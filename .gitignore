@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# dbt
+target/
+logs/
+dbt_packages/
+.user.yml
+# A profile holds warehouse credentials. The tests write their own in a temp directory.
+/profiles.yml
+
+# hodor and DuckDB state from local runs
+.hodor/
+*.duckdb
+*.duckdb.wal
+
+# Docs site output
+site/
+
+# Secrets
+.env
+.env.*
+*.pem
+
+# Agent and editor tooling: local session state, not part of the package
+.claude/
+.agents/
+.ai-dev-kit/
+.impeccable/
+.palette-options/
+.playwright-mcp/
+.databricks/
+.mcp.json
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local-only: test bundles and scratch scripts
+local/
+
+# Local dev helper: hardcodes a private machine path
+livewatch.ps1
+
+# Logo sources and generator: kept out of the package on purpose
+branding/
+
+# Internal notes and history archives must never be published
+handover.md
+**/handover.md
+*.bundle
+*.zip

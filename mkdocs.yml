@@ -1,0 +1,91 @@
+site_name: dbt-hodor
+site_description: Hold Old Data, Or Rebuild
+docs_dir: docs
+copyright: Apache-2.0
+
+theme:
+  name: material
+  font: false # system fonts: no request to Google Fonts
+  logo: assets/hodor-icon.svg # small raven mark for the dark header, both schemes
+  favicon: assets/favicon.svg # follows the browser color scheme
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - How it works:
+      - Run flow: how-it-works/run-flow.md
+      - Decision rules: how-it-works/decision-rules.md
+      - Hashing: how-it-works/hashing.md
+      - Data versions: how-it-works/data-versions.md
+      - Lineage: how-it-works/lineage.md
+  - Guides:
+      - Configuration: configuration.md
+      - State stores: stores.md
+      - Operations: operations.md
+  - Interactive guide: guide/index.html
+  - Reference:
+      - Design spec: design.md
+      - Development: development.md
+      - License: license.md
