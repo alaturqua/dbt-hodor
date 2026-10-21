@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release, for example v0.1.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: The tag must match the version in pyproject.toml
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version=$(uv run --no-project python -c \
+            "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "tag=$tag version=$version"
+          test "$tag" = "v$version"
+
+      - name: Tests must pass on the tagged commit
+        run: |
+          uv sync --group dev --extra duckdb --extra postgres
+          uv run ruff check
+          uv run pytest -q
+
+      - run: uv build
+      - name: Check the wheel carries LICENSE and NOTICE
+        run: python -m zipfile -l dist/*.whl | grep -E "LICENSE|NOTICE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Draft a release with the built files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        # A draft, so the notes can be read before anyone sees the release.
+        run: gh release create "$TAG" dist/* --draft --generate-notes --title "$TAG"
+
+  publish-pypi:
+    needs: build
+    # Publishing is off until the project is ready for it. Turn it on by setting the
+    # repository variable PUBLISH_TO_PYPI to true (Settings, Secrets and variables, Actions).
+    # It also needs a PyPI trusted publisher for this repository and an environment named
+    # pypi; no API token is stored anywhere.
+    if: vars.PUBLISH_TO_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

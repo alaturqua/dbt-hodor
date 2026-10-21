@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: deps
+    # dbt-core and the adapters move together and a minor bump can change compiled SQL, so
+    # those are reviewed by hand rather than opened as a pull request every month.
+    ignore:
+      - dependency-name: dbt-core
+      - dependency-name: dbt-databricks
+      - dependency-name: dbt-duckdb

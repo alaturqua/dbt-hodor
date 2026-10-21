@@ -1,0 +1,80 @@
+name: Bug report
+description: hodor behaved in a way you did not expect
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        If hodor **reused** a node whose code or upstream data had changed, stop and report it
+        privately instead: [open a security advisory](https://github.com/alaturqua/dbt-hodor/security/advisories/new).
+        A missed reuse, where hodor built something it could have skipped, belongs here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what hodor did instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: explain
+    attributes:
+      label: Output of dbt-hodor explain
+      description: >
+        `dbt-hodor explain -s <node>` for the affected node. This is the single most useful
+        thing you can attach: it shows the reason, the last build it compared with, and the
+        hashes and data versions on both sides.
+      render: text
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The smallest model and config that shows it. A full project is rarely needed.
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: dbt-hodor, dbt-core and the adapter with its version.
+      placeholder: dbt-hodor 0.1.0, dbt-core 1.12.5, dbt-databricks 1.12.7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: store
+    attributes:
+      label: State store
+      options:
+        - delta
+        - duckdb
+        - postgres or lakebase
+    validations:
+      required: true
+
+  - type: input
+    id: reason
+    attributes:
+      label: Reason code
+      description: The reason hodor logged for that node, if there was one.
+      placeholder: no_new_data, code_changed, target_modified, hodor_error
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: dbt output
+      description: The relevant result lines and any dbt-hodor warning. Remove anything private.
+      render: text
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed catalog, schema, table and host names I do not want public.
+          required: true
+        - label: This is not a wrong reuse (those go to a private advisory).
+          required: true

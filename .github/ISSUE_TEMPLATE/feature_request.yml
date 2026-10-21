@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a change or an addition
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Section 3 of the [design spec](https://github.com/alaturqua/dbt-hodor/blob/main/docs/design.md)
+        lists what is deliberately out of scope and why. Worth a look first.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that hodor makes hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: A setting, a reason code, a store, a command. Rough is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: correctness
+    attributes:
+      label: Could it cause a wrong reuse?
+      description: >
+        hodor only reuses a node when it can prove nothing changed. If your idea widens what
+        counts as unchanged, say what could still change underneath it. An honest answer here
+        helps more than a confident one.
+
+  - type: input
+    id: adapter
+    attributes:
+      label: Adapter
+      description: Which warehouse this is about, if it matters.
+      placeholder: databricks, duckdb

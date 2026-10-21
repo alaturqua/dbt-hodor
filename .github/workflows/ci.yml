@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+
+  test:
+    # Windows is in the matrix because hodor is developed there and paths and line endings
+    # have broken before.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12"]
+        include:
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - run: uv sync --group dev --extra duckdb --extra postgres
+      - name: Unit and end-to-end tests
+        # The default marker filter skips benchmarks and the live Databricks and Postgres tests.
+        run: uv run pytest -q
+
+  postgres:
+    # The Postgres store end to end, against a container. The warehouse stays DuckDB, so this
+    # needs no cloud account. The Lakebase path is covered by the same test with an endpoint.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --extra duckdb --extra postgres
+      - name: Postgres state store end to end
+        env:
+          HODOR_PG_HOST: localhost
+          HODOR_PG_PORT: "5432"
+          HODOR_PG_USER: postgres
+          HODOR_PG_PASSWORD: postgres
+          HODOR_PG_DATABASE: postgres
+          HODOR_PG_SCHEMA: hodor_ci
+          HODOR_PG_SSLMODE: disable
+        run: uv run pytest -q -m postgres tests/e2e/test_postgres_state.py
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --group docs
+      - run: uv run mkdocs build --strict
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv build
+      - name: Check the wheel carries LICENSE and NOTICE
+        run: |
+          python -m zipfile -l dist/*.whl | grep -E "LICENSE|NOTICE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
