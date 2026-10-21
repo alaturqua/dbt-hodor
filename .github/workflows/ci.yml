@@ -1,0 +1,126 @@
+name: CI
+
+# Only the things that can break the code. A docs-only change runs the Docs site workflow
+# instead, so a typo in a Markdown file does not spend minutes on a test matrix.
+on:
+  push:
+    branches: [main]
+    paths: &code
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths: *code
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# The Linux runner is pinned, not ubuntu-latest: that label started moving to Ubuntu 26 on
+# 2026-10-19, and a runner image changing under a build nobody touched is not a failure
+# anyone wants to debug. Move the pin deliberately, and run the suite once when you do.
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+
+  test:
+    # The ends of the supported range, not every version in it: a break on 3.11 that shows on
+    # neither 3.10 nor 3.12 is not a thing that happens here. Windows is included because
+    # hodor is developed there and paths and line endings have broken before.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python: "3.10"
+          - os: ubuntu-24.04
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - run: uv sync --group dev --extra duckdb --extra postgres
+      - name: Unit and end-to-end tests
+        # The default marker filter skips benchmarks and the live Databricks and Postgres tests.
+        run: uv run pytest -q
+
+  postgres:
+    # The Postgres store end to end against a container, so it needs no cloud account. The
+    # Lakebase path is the same test with an endpoint, and runs by hand.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --extra duckdb --extra postgres
+      - name: Postgres state store end to end
+        env:
+          HODOR_PG_HOST: localhost
+          HODOR_PG_PORT: "5432"
+          HODOR_PG_USER: postgres
+          HODOR_PG_PASSWORD: postgres
+          HODOR_PG_DATABASE: postgres
+          HODOR_PG_SCHEMA: hodor_ci
+          HODOR_PG_SSLMODE: disable
+        run: uv run pytest -q -m postgres tests/e2e/test_postgres_state.py
+
+  build:
+    # Packaging only needs checking once a change lands, not on every push to a branch. The
+    # release workflow builds again from the tag anyway.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv build
+      - name: The wheel must carry LICENSE and NOTICE
+        run: python -m zipfile -l dist/*.whl | grep -E "LICENSE|NOTICE"
+      # An installable wheel without cutting a release. Download the latest with
+      # `gh run download -n dist`, or from the run page. Short retention: these are
+      # development builds, and a real version comes from a v* tag.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error

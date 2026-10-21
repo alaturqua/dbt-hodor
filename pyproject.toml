@@ -1,0 +1,68 @@
+[project]
+name = "dbt-hodor"
+version = "0.1.0"
+description = "Reuse unchanged dbt nodes and rebuild only when code or upstream data changed. A free, self-hosted alternative to dbt State."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [
+    { name = "Isa Inalcik" }
+]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "dbt-core>=1.12,<1.13",
+    "sqlglot>=30.22,<31",
+]
+
+[project.scripts]
+dbt-hodor = "dbt_hodor.cli:main"
+
+[project.optional-dependencies]
+duckdb = [
+    "duckdb>=1.0",
+]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
+lakebase = [
+    "psycopg[binary]>=3.2",
+    "databricks-sdk>=0.81",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not benchmark and not databricks and not postgres'"
+markers = [
+    "benchmark: performance benchmarks, run with -m benchmark",
+    "databricks: live tests against a Databricks workspace, run with -m databricks",
+    "postgres: live tests against Postgres or Lakebase, run with -m postgres",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[dependency-groups]
+dev = [
+    "dbt-databricks==1.12.7",
+    "dbt-duckdb>=1.11.0",
+    "duckdb>=1.0",
+    "git-cliff>=2.6",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+]
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.7.7,<10",
+]

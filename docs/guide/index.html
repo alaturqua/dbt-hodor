@@ -1,0 +1,1730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dbt-hodor: Hold Old Data, Or Rebuild</title>
+<link rel="icon" href="data:,">
+<script>(function(){var t=null;try{t=localStorage.getItem("hodor-theme")}catch(e){}if(t!=="light"&&t!=="dark")t=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t)})()</script>
+<meta name="description" content="An interactive guide to dbt-hodor, a free, self-hosted dbt plugin that reuses unchanged nodes and rebuilds only when code or upstream data changed.">
+<style>
+/* Cinzel (SIL OFL 1.1) is served from the site, see ../assets/fonts/cinzel/OFL.txt. The serif fallback keeps the page fine when it is opened on its own. */
+@font-face { font-family:"Cinzel"; src:url("../assets/fonts/cinzel/Cinzel.ttf") format("truetype"); font-weight:400 900; font-style:normal; font-display:swap; }
+:root, [data-theme="dark"] {
+  --door1:#e03131; --door2:#cc2222;
+  --bg:#12161d; --bar:#171c24; --panel:#171c24; --panel2:#1e242e; --line:#2e3643; --line2:#748093;
+  --tx:#d9dee6; --dim:#9ca6b4; --teal:#5cc8b8; --amber:#e3b55b; --red:#ec7c7c; --focus:#89b4fa;
+  --tealbg:#15302e; --amberbg:#2f2814; --redbg:#3a1c20; --acc:#ec7c7c; --btnbg:#d9dee6; --btntx:#12161d; /* neutral buttons: red stays for brand accents and errors */
+  --tealg:#5cc8b8; --amberg:#e3b55b; --onamber:#12161d;
+  --termbg:#0e1117; --termcur:#1e242e; --termsum:#f1f4f8; --shadow:none;
+  --hbg:#0b0e13; --hrule:#cc2222; --htx:#e7eaf0; --hsub:#b6bfcc; --hbtn:#8a95a6; --hhover:#1e242e; --hfocus:#89b4fa; /* header */
+  --display:"Cinzel","Iowan Old Style",Georgia,"Times New Roman",serif;
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  --door1:#b91c1c; --door2:#991b1b;
+  --bg:#f4f2ed; --bar:#faf9f6; --panel:#faf9f6; --panel2:#ebe8e1; --line:#dcd8cf; --line2:#73706a;
+  --tx:#1f2430; --dim:#4d5361; --teal:#1d6b63; --amber:#874a0f; --red:#a61e22; --focus:#2f5fb3;
+  --tealbg:#dbece7; --amberbg:#f3e5c6; --redbg:#f5dcda; --acc:#a61e22; --btnbg:#1f2430; --btntx:#ffffff;
+  --tealg:#2a7f75; --amberg:#a8641a; --onamber:#ffffff;
+  --termbg:#faf9f6; --termcur:#e6e2da; --termsum:#1f2430; --shadow:0 1px 2px rgba(31,36,48,.07);
+  --hbg:#1f2633; --hrule:#e03131; --htx:#f4f2ed; --hsub:#c9ced8; --hbtn:#9aa3b2; --hhover:#2d3646; --hfocus:#89b4fa;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin:0; background:var(--bg); color:var(--tx); font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; overflow-x:hidden; }
+code, pre, kbd { font-family: ui-monospace,SFMono-Regular,Consolas,Menlo,monospace; font-size:.9em; }
+code { background:var(--panel2); padding:.1em .4em; border-radius:4px; overflow-wrap:anywhere; }
+pre { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:14px 16px; overflow-x:auto; margin:.8em 0; line-height:1.5; }
+pre code { background:none; padding:0; overflow-wrap:normal; }
+kbd { border:1px solid var(--line2); border-radius:4px; padding:1px 6px; background:var(--panel); }
+a { color:var(--acc); }
+h1,h2,h3 { line-height:1.25; margin:0 0 .5em; }
+h2 { font-family:var(--display); font-size:1.9rem; font-weight:700; letter-spacing:.01em; margin-bottom:.35em; }
+h3 { font-size:1.05rem; margin-top:1.8em; }
+p { margin:.5em 0 1em; }
+.wrap { max-width:1200px; margin:0 auto; padding:0 20px; }
+:focus-visible { outline:3px solid var(--focus); outline-offset:2px; border-radius:4px; }
+.skiplink { position:absolute; left:-999px; top:0; background:var(--btnbg); color:var(--btntx); padding:8px 12px; z-index:10; }
+.skiplink:focus { left:8px; top:8px; }
+
+/* header: navy (light) or near-black navy (dark), like the docs site */
+header { background:var(--hbg); border-bottom:3px solid var(--hrule); color:var(--htx); }
+.top { display:flex; align-items:center; gap:14px; padding:8px 20px; flex-wrap:wrap; }
+.brand { display:flex; align-items:center; gap:12px; min-width:0; flex:1; flex-wrap:wrap; }
+.brand svg { width:40px; height:40px; flex:none; }
+.brand h1 { font-family:var(--display); font-size:1.3rem; margin:0; letter-spacing:.06em; }
+.brand p { margin:0; color:var(--hsub); font-size:.92rem; }
+.btn { font:inherit; font-weight:500; background:var(--panel); color:var(--tx); border:1px solid var(--line2); border-radius:8px; padding:7px 14px; cursor:pointer; min-height:40px; transition:background .15s, border-color .15s; }
+.btn:hover { background:var(--panel2); border-color:var(--tx); }
+.btn.primary { background:var(--btnbg); color:var(--btntx); border-color:var(--btnbg); font-weight:600; }
+.btn.primary:hover { filter:brightness(1.08); }
+.btn[aria-pressed="true"] { background:var(--panel2); border-color:var(--tx); color:var(--tx); }
+.btn:disabled { color:var(--dim); border-color:var(--line); background:var(--panel2); cursor:default; }
+/* header buttons look like the MkDocs header: icon plus label, no frame until hover */
+.hbtn { display:inline-flex; align-items:center; gap:6px; min-height:40px; padding:6px 10px; border-radius:8px; border:1px solid transparent; background:transparent; color:var(--htx); font:inherit; font-weight:500; text-decoration:none; cursor:pointer; }
+.hbtn:hover { background:var(--hhover); border-color:var(--hbtn); }
+.hbtn svg { width:24px; height:24px; fill:currentColor; flex:none; }
+.hbtn.icon { padding:8px; }
+header :focus-visible { outline-color:var(--hfocus); }
+
+/* tabs */
+nav.steps { background:var(--bar); border-bottom:1px solid var(--line); }
+[role="tablist"] { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:2px; padding:4px 0 0; }
+[role="tab"] { font:inherit; font-size:.88rem; line-height:1.25; min-width:0; background:none; color:var(--dim); border:0; border-bottom:3px solid transparent; border-radius:6px 6px 0 0; padding:6px 4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px; overflow-wrap:anywhere; }
+@media (min-width: 1100px) { [role="tablist"] { grid-template-columns:repeat(9,minmax(0,1fr)); } [role="tab"] { flex-direction:row; justify-content:center; text-align:left; gap:8px; font-size:.88rem; padding:6px 6px; } }
+@media (max-width: 420px) { [role="tablist"] { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width: 360px) { [role="tab"] { font-size:.78rem; padding:6px 2px; } }
+[role="tab"] .n { display:inline-grid; place-items:center; flex:none; width:22px; height:22px; border-radius:50%; border:1px solid var(--line2); font-size:.78rem; }
+[role="tab"]:hover { color:var(--tx); background:var(--panel2); }
+[role="tab"][aria-selected="true"] { color:var(--tx); border-bottom-color:var(--acc); font-weight:600; }
+[role="tab"][aria-selected="true"] .n { background:var(--btnbg); color:var(--btntx); border-color:var(--btnbg); }
+nav .track { height:3px; background:var(--panel2); }
+/* scaled, not resized: animating width would lay out the page on every step */
+nav .fill { height:100%; background:var(--acc); width:100%; transform:scaleX(.111); transform-origin:left; transition:transform .35s ease; }
+
+/* panels */
+main.wrap { padding:32px 20px 8px; }
+[role="tabpanel"] { animation: fadein .35s ease; }
+[role="tabpanel"][hidden] { display:none; }
+@keyframes fadein { from { opacity:0; transform:translateY(6px); } }
+.lead { font-size:1.1rem; color:var(--dim); max-width:68ch; margin-bottom:1.6em; }
+.grid2 { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:24px; align-items:start; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; min-width:0; box-shadow:var(--shadow); }
+.card h3:first-child { margin-top:0; }
+.card > :last-child { margin-bottom:0; }
+.pager { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:40px 0 8px; padding-top:20px; border-top:1px solid var(--line); }
+.pager .small { text-align:center; }
+.ctrl { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0 4px; }
+.ctrl .prog2 { margin-left:auto; font-size:.88rem; color:var(--dim); font-variant-numeric:tabular-nums; }
+.help { margin:4px 0 12px; }
+.note { border:1px solid var(--amberg); background:var(--amberbg); padding:14px 18px; border-radius:8px; margin:1.4em 0; }
+.note.ok { border-color:var(--tealg); background:var(--tealbg); }
+.chip { display:inline-block; padding:2px 10px; line-height:1.4; border-radius:99px; font-size:.78rem; font-weight:700; border:1px solid currentColor; }
+.chip.build { color:var(--amber); background:var(--amberbg); }
+.chip.reuse { color:var(--teal); background:var(--tealbg); }
+.chip.err { color:var(--red); background:var(--redbg); }
+.tw { overflow-x:auto; margin:.8em 0 1.2em; border:1px solid var(--line); border-radius:8px; background:var(--panel); }
+table { border-collapse:collapse; width:100%; font-size:.93rem; }
+th, td { text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { background:var(--panel2); font-size:.85rem; }
+tr:last-child td { border-bottom:0; }
+.row { display:flex; flex-wrap:wrap; gap:8px; margin:.8em 0; }
+.stat { flex:1 1 140px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+.stat b { display:block; font-size:1.7rem; line-height:1.2; letter-spacing:-.02em; }
+.stat span { color:var(--dim); font-size:.9rem; }
+svg { max-width:100%; height:auto; }
+svg text { fill:var(--tx); font-family:inherit; }
+.small { font-size:.88rem; color:var(--dim); }
+input[type=range] { width:100%; accent-color:var(--acc); }
+label { cursor:pointer; }
+
+/* tab 1 */
+.timeline { position:relative; height:34px; background:var(--panel2); border:1px solid var(--line); border-radius:8px; margin:26px 0 30px; }
+.timeline .busy { position:absolute; top:0; bottom:0; left:8.333%; width:29.167%; background:var(--amberg); border-radius:6px; transform-origin:left; animation: grow 1.6s ease-out; color:var(--onamber); font-weight:700; font-size:.85rem; display:grid; place-items:center; }
+.timeline .tick { position:absolute; top:38px; font-size:.78rem; color:var(--dim); transform:translateX(-50%); }
+.timeline .tick:first-of-type { transform:none; }
+@keyframes grow { from { transform:scaleX(0); } }
+.cells { display:grid; grid-template-columns:repeat(20,1fr); gap:3px; }
+.cells i { aspect-ratio:1; border-radius:3px; background:var(--amberg); transition:background .25s; }
+.cells i.r { background:var(--tealg); }
+
+/* tab 2 */
+.letters { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin:16px 0 24px; }
+.letters div { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 4px; text-align:center; animation: pop .5s both; box-shadow:var(--shadow); }
+.letters div:nth-child(2) { animation-delay:.12s } .letters div:nth-child(3) { animation-delay:.24s } .letters div:nth-child(4) { animation-delay:.36s } .letters div:nth-child(5) { animation-delay:.48s }
+.letters b { display:block; font-family:var(--display); font-size:2.6rem; line-height:1; color:var(--acc); }
+.letters span { font-size:.85rem; color:var(--dim); overflow-wrap:anywhere; }
+@keyframes pop { from { opacity:0; transform:scale(.8); } }
+.pk.stop { transform:translateX(96px); } .pk.go { transform:translateX(238px); }
+.pk.stop { animation: mvstop 4.5s ease-in-out infinite; } .pk.go { animation: mvgo 4.5s ease-in-out infinite; }
+.pk rect { fill:var(--tealg); } .pk.go rect { fill:var(--amberg); }
+/* the door of the logo: red arch, planks, studs, bar, raven */
+.doorbar, .door .stud, .door .raven { fill:var(--tx); } .door .plank { stroke:var(--panel2); stroke-width:4; fill:none; } .door .raven-legs { stroke:var(--tx); stroke-width:2.4; stroke-linecap:round; fill:none; } .door .eye { fill:var(--door1); }
+/* each label in the color of its moving node */
+.door .lbl { font-size:12px; font-weight:700; } .door .lbl.stop { fill:var(--teal); } .door .lbl.go { fill:var(--amber); }
+@keyframes mvstop { from { transform:translateX(0); } 45%,100% { transform:translateX(96px); } }
+@keyframes mvgo { from { transform:translateX(0); } 25%,35% { transform:translateX(96px); } 70%,100% { transform:translateX(238px); } }
+
+/* tab 3 & 6 svg */
+.dg rect.box { fill:var(--panel2); stroke:var(--line2); stroke-width:1.5; transition:fill .25s, stroke .25s; }
+.dg .on rect.box { fill:var(--panel); stroke:var(--acc); stroke-width:3; }
+.dg .on.reu rect.box { fill:var(--tealbg); stroke:var(--tealg); }
+.dg .on.bld rect.box { fill:var(--amberbg); stroke:var(--amberg); }
+.dg .edge { stroke:var(--line2); stroke-width:2; fill:none; }
+.dg .edge.hot { stroke:var(--acc); stroke-dasharray:6 5; animation: dash .9s linear infinite; }
+@keyframes dash { to { stroke-dashoffset:-22; } }
+.dg .ahead { fill:var(--line2); }
+.dg .loop { fill:none; stroke:var(--line2); stroke-dasharray:4 4; }
+.dg .sub { fill:var(--dim); font-size:11px; }
+.dg g[data-i] { cursor:pointer; }
+.dg .tg rect.box { stroke:var(--tx); stroke-width:3; }
+.dg .dep rect.box { fill:var(--tealbg); stroke:var(--tealg); stroke-width:3; }
+.dg .via rect.box { stroke:var(--tealg); stroke-dasharray:5 3; stroke-width:2.5; }
+.dg .unk rect.box { fill:var(--redbg); stroke:var(--red); stroke-width:3; }
+.stepinfo { min-height:9em; }
+.stepinfo .k { color:var(--dim); font-size:.85rem; }
+
+/* tab 4 */
+.scen { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+.scen .btn { padding:4px 12px; min-height:36px; font-size:.9rem; }
+.scen .btn[aria-pressed="true"] { background:var(--tx); color:var(--bg); border-color:var(--tx); }
+ol.ladder { list-style:none; margin:0; padding:0; }
+ol.ladder li { display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:4px 10px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; margin-bottom:5px; background:var(--panel); transition:background .25s, border-color .25s; align-items:center; }
+ol.ladder .num { color:var(--dim); font-size:.85rem; }
+ol.ladder .cond { grid-column:2; font-size:.88rem; color:var(--dim); }
+ol.ladder li.pass { background:var(--panel2); }
+ol.ladder li.pass .st::after { content:"no match"; }
+ol.ladder li.skip { border-style:dashed; background:transparent; }
+ol.ladder li.skip .st::after { content:"not reached"; }
+ol.ladder li.hit { border-color:var(--tealg); border-width:2px; background:var(--tealbg); }
+ol.ladder li.hit.build { border-color:var(--amberg); background:var(--amberbg); }
+ol.ladder li.hit .st::after { content:"MATCH"; font-weight:700; color:var(--tx); }
+ol.ladder .st { font-size:.78rem; color:var(--dim); grid-row:1; grid-column:3; }
+ol.ladder .cond { grid-row:2; }
+.result { margin:12px 0; padding:14px 16px; border-radius:10px; background:var(--panel2); border:1px solid var(--line); min-height:7em; }
+
+/* tab 5 */
+ul.log { list-style:none; margin:10px 0; padding:0; font-size:.88rem; }
+ul.log li { display:grid; grid-template-columns:3.2em minmax(0,1fr) auto; gap:8px; padding:6px 12px; border:1px solid var(--line); border-radius:6px; margin-bottom:3px; background:var(--panel); align-items:center; transition:background .2s; }
+ul.log li .why { color:var(--dim); font-size:.78rem; grid-column:2 / 4; }
+ul.log li.maint, ul.log li.zero { background:var(--panel2); color:var(--dim); border-style:dashed; }
+ul.log li.scan { outline:2px solid var(--focus); }
+ul.log li.found { background:var(--tealbg); border-color:var(--tealg); color:var(--tx); border-style:solid; }
+ul.log li.fresh { animation: slidein .4s; }
+@keyframes slidein { from { opacity:0; transform:translateY(-10px); } }
+.tok { font-size:1.02rem; padding:12px 16px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; margin:10px 0; }
+.fp { font-family:ui-monospace,Consolas,monospace; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin:10px 0; }
+
+/* tab 7 */
+.modes { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.modes label { flex:1 1 150px; border:1px solid var(--line2); border-radius:10px; padding:10px 12px; background:var(--panel); }
+.modes label:has(input:checked) { background:var(--panel2); border-color:var(--acc); border-width:2px; padding:9px 11px; }
+.modes label:has(input:focus-visible) { outline:3px solid var(--focus); outline-offset:2px; }
+.modes small { display:block; color:var(--dim); }
+.nodes { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:14px 0; }
+.nd { border:2px solid var(--line2); border-radius:10px; padding:8px 4px; text-align:center; font-size:.82rem; background:var(--amberbg); min-height:70px; transition:background .3s, border-color .3s; overflow-wrap:anywhere; }
+.nd b { display:block; font-size:.9rem; }
+.nd.reuse { background:var(--tealbg); border-color:var(--tealg); }
+.nd.ghost { border-style:dashed; border-color:var(--tealg); }
+.nd.err { border-color:var(--red); background:var(--redbg); }
+.nd.fresh { animation: pop .4s; }
+.summary { font-family:ui-monospace,Consolas,monospace; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px 14px; min-height:2.6em; overflow-wrap:anywhere; }
+
+/* simulator */
+.term { background:var(--termbg); color:var(--tx); border:1px solid var(--line2); border-radius:10px; padding:12px 14px; overflow:auto; font:.78rem/1.55 ui-monospace,SFMono-Regular,Consolas,Menlo,monospace; }
+.term div { white-space:pre; }
+.term.mini { font-size:.74rem; line-height:1.5; padding:8px 10px; margin:0; }
+.term .l-dim { color:var(--dim); } .term .l-reuse { color:var(--teal); } .term .l-warn { color:var(--amber); } .term .l-err { color:var(--red); } .term .l-sum { color:var(--termsum); font-weight:700; }
+.term .cur { background:var(--termcur); }
+/* a typed command: the width grows one character per step */
+.term .typed { display:inline-block; overflow:hidden; vertical-align:bottom; animation:typing .7s steps(var(--n)) both; }
+@keyframes typing { from { width:0; } to { width:calc(var(--n) * 1ch); } }
+.xpl { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.xpl .btn { padding:3px 10px; min-height:30px; }
+/* while explain output shows, the terminal takes the room of the run metrics */
+.col.xmode .metrics { display:none; }
+.meters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:0; }
+.mt { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:8px 12px; min-width:0; }
+.mt .ml { font-size:.78rem; color:var(--dim); }
+.mt b { display:block; font-size:1.25rem; line-height:1.25; letter-spacing:-.01em; font-variant-numeric:tabular-nums; }
+.mt .ms { font-size:.78rem; color:var(--dim); font-variant-numeric:tabular-nums; }
+.mbar { height:6px; background:var(--panel); border:1px solid var(--line2); border-radius:3px; overflow:hidden; margin:3px 0; }
+.mbar i { display:block; height:100%; background:var(--tealg); }
+.metrics .mcap { margin:0 0 4px; }
+.ctl { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.ctl select { font:inherit; background:var(--panel); color:var(--tx); border:1px solid var(--line2); border-radius:8px; padding:6px 8px; min-height:40px; }
+.dg .sg.s-run rect.box { stroke:var(--amberg); stroke-width:3; stroke-dasharray:6 4; animation: dash .9s linear infinite; }
+.dg .sg.s-reuse rect.box { fill:var(--tealbg); stroke:var(--tealg); stroke-width:2.5; }
+.dg .sg.s-build rect.box { fill:var(--amberbg); stroke:var(--amberg); stroke-width:2.5; }
+.dg .sg.s-ghost rect.box { fill:var(--amberbg); stroke:var(--tealg); stroke-dasharray:4 3; stroke-width:2.5; }
+.dg .sg.s-err rect.box { fill:var(--redbg); stroke:var(--red); stroke-width:3; }
+.dg .tagtx { fill:var(--amber); font-size:10.5px; font-weight:700; }
+.legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:.82rem; color:var(--dim); margin-top:10px; }
+
+footer { border-top:1px solid var(--line); margin-top:40px; padding:20px 0 32px; color:var(--dim); font-size:.88rem; }
+footer p { margin:.3em 0; }
+
+/* layout: stage = visual left, log right */
+.ph h2 { margin-bottom:.2em; }
+.stage { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
+.col { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.fill { display:flex; flex-direction:column; }
+.fill > .term, .fill > .log { min-height:140px; }
+.term { height:280px; }
+.scroll { overflow:auto; position:relative; }
+.docbody { position:relative; }
+details.more { margin:8px 0 0; }
+details.more summary { cursor:pointer; font-weight:600; font-size:.9rem; padding:4px 0; }
+.bullets { margin:0; padding-left:1.2em; }
+.bullets li { margin:.3em 0; }
+.simdesc { margin:6px 0 10px; }
+svg.door { width:100%; max-height:250px; }
+.legend span { white-space:nowrap; }
+.toc { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+.toc .btn { min-height:32px; padding:2px 10px; font-size:.85rem; }
+.docbody { max-width:960px; }
+.docbody h2 { font-size:1.4rem; }
+.docbody h3 { scroll-margin-top:8px; }
+
+@media (min-width: 1000px) and (min-height: 540px) {
+  html, body { height:100%; }
+  body { display:flex; flex-direction:column; overflow:hidden; font-size:15px; line-height:1.5; }
+  .wrap { max-width:1360px; }
+  main.wrap { flex:1; min-height:0; width:100%; display:flex; flex-direction:column; padding:8px 20px 0; }
+  [role="tabpanel"]:not([hidden]) { flex:1; min-height:0; display:flex; flex-direction:column; gap:8px; animation:none; }
+  .ph h2 { font-size:1.35rem; margin:0; }
+  .lead { font-size:.92rem; margin:0; max-width:none; }
+  h3 { font-size:.98rem; margin-top:1.1em; }
+  p { margin:.35em 0 .6em; }
+  .stage { flex:1; min-height:0; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; align-items:stretch; }
+  .stage.w3 { grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); }
+  .stage.w4 { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); }
+  .col { min-height:0; gap:10px; overflow:auto; }
+  .col > .card, .col > .letters, .col > .scen, .col > .result, .col > label, .col > .ctrl, .col > .help, .col > details, .col > .metrics { flex:none; }
+  .col > .fill { flex:1 1 0; min-height:90px; }
+  .term { height:auto; }
+  .fill > .term, .fill > .log, .col > .term { flex:1 1 0; min-height:0; }
+  .fill > h3 { margin-bottom:.4em; }
+  .card { padding:12px 14px; border-radius:10px; }
+  .card h3:first-child { margin-bottom:.35em; }
+  .stat { padding:8px 12px; }
+  .stat b { font-size:1.4rem; }
+  .row { margin:.5em 0; }
+  .btn { min-height:34px; padding:4px 12px; }
+  .scen { margin:0; gap:5px; }
+  .scen .btn { min-height:28px; padding:2px 9px; font-size:.82rem; }
+  .simdesc { margin:0; font-size:.9rem; }
+  .timeline { margin:24px 0 26px; }
+  .letters { margin:0; gap:8px; }
+  .letters div { padding:8px 4px; }
+  .letters b { font-size:2rem; }
+  #simdag { max-height:270px; }
+  #dag { max-height:230px; }
+  .meters.compact { grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
+  .meters.compact .mt { padding:5px 8px; }
+  .meters.compact .mt b { font-size:1.02rem; }
+  .meters.compact .mt .ml, .meters.compact .mt .ms { font-size:.7rem; }
+  .metrics { flex:none; }
+  .metrics details.more { margin:4px 0 0; }
+  .cells { gap:2px; }
+  .cells i { aspect-ratio:1.7; }
+  .note { margin:0; padding:8px 14px; font-size:.88rem; }
+  .result { margin:0; padding:10px 12px; min-height:0; }
+  .tw { margin:.5em 0; }
+  th, td { padding:6px 10px; }
+  table { font-size:.85rem; }
+  .stepinfo { min-height:0; }
+  ol.ladder li { padding:5px 10px; margin-bottom:3px; }
+  ol.ladder .cond { font-size:.8rem; }
+  ul.log li { padding:3px 10px; margin-bottom:2px; font-size:.82rem; grid-template-columns:3em minmax(0,1fr) auto auto; }
+  ul.log li .why { grid-column:auto; order:3; }
+  ul.log { overflow:auto; flex:1; min-height:120px; margin:6px 0; }
+  .tok { padding:8px 12px; margin:6px 0; font-size:.92rem; }
+  .fp { padding:8px 12px; margin:6px 0; font-size:.85rem; }
+  .modes { margin:8px 0; }
+  .modes label { padding:6px 10px; font-size:.9rem; flex:1 1 120px; }
+  .modes label:has(input:checked) { padding:5px 9px; }
+  .nodes { margin:8px 0; gap:6px; }
+  .nd { min-height:0; padding:3px 3px; font-size:.74rem; line-height:1.35; }
+  .nd b { font-size:.82rem; }
+  .modes small { font-size:.74rem; line-height:1.3; }
+  #p8 table { font-size:.8rem; }
+  #p8 th, #p8 td { padding:3px 10px; }
+  #p8 .card > p { margin:.25em 0 .4em; }
+  #p8 .tw { margin:.4em 0 0; }
+  #p8 pre { margin:.4em 0 0; padding:5px 10px; }
+  .summary { padding:6px 12px; min-height:0; font-size:.85rem; }
+  .ctrl { margin:0; }
+  .help { margin:0; }
+  pre { margin:.5em 0; padding:8px 12px; font-size:.85rem; }
+  .pager { flex:none; margin:0; padding:6px 0; border-top:1px solid var(--line); }
+  .pager .btn { min-width:150px; min-height:32px; }
+  .pager .btn:first-child { text-align:left; } .pager .btn:last-child { text-align:right; }
+  footer { flex:none; margin:0; padding:4px 0 6px; font-size:.7rem; line-height:1.35; }
+  footer p { margin:0; }
+  /* docs: the page does not scroll, the docs pane does */
+  #p9:not([hidden]) .docs { flex:1; min-height:0; display:grid; grid-template-columns:150px minmax(0,1fr); gap:16px; }
+  #p9 .toc { flex-direction:column; flex-wrap:nowrap; align-content:start; margin:0; overflow:auto; }
+  #p9 .toc .btn { text-align:left; }
+  .docbody { overflow:auto; max-width:none; padding-right:12px; }
+  .docbody h2 { margin-bottom:.4em; }
+}
+@media (max-width: 760px) {
+  h2 { font-size:1.5rem; }
+  .brand h1 { font-size:1.2rem; }
+  .stepinfo { min-height:0; }
+  .card { padding:16px; }
+  main.wrap { padding-top:24px; }
+}
+/* played on request when reduced motion is on: beats the rule below by specificity */
+.door.play .pk.stop { animation: mvstop 4.5s ease-in-out 1 !important; }
+.door.play .pk.go { animation: mvgo 4.5s ease-in-out 1 !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+}
+</style>
+</head>
+<body>
+<a class="skiplink" href="#main">Skip to content</a>
+<header>
+  <div class="wrap top">
+    <div class="brand">
+      <svg viewBox="2 2 96 96" aria-hidden="true" focusable="false">
+        <defs><linearGradient id="hodor-door" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e03131"/><stop offset="1" stop-color="#cc2222"/></linearGradient></defs><path d="M21 93V64a27 27 0 0 1 54 0v29z" fill="url(#hodor-door)"/><path d="M39 40V93M57 40V93" stroke="#0d1117" stroke-width="6" fill="none"/><rect x="12" y="63" width="72" height="9" rx="2" fill="#e7e5e4"/><circle cx="30" cy="51" r="2.4" fill="#e7e5e4"/><circle cx="30" cy="84" r="2.4" fill="#e7e5e4"/><circle cx="66" cy="51" r="2.4" fill="#e7e5e4"/><circle cx="66" cy="84" r="2.4" fill="#e7e5e4"/><g transform="translate(0 -15)"><path d="M10 54L30 42C36 30 50 24 60 27C63 21 72 21 76 26L91 30L78 34C77 40 73 44 68 47C64 51 56 50 50 49Z" fill="#e7e5e4"/><path d="M56 48V54M62 47V54" stroke="#e7e5e4" stroke-width="2.4" stroke-linecap="round"/><circle cx="70.5" cy="27.5" r="1.9" fill="#b91c1c"/></g>
+      </svg>
+      <h1>dbt-hodor</h1>
+      <p>Hold Old Data, Or Rebuild</p>
+    </div>
+    <a class="hbtn" id="docs" href="../" title="Back to the dbt-hodor docs"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg><span>Docs</span></a>
+    <a class="hbtn" id="repo" href="https://github.com/alaturqua/dbt-hodor" title="dbt-hodor on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12,2A10,10 0 0,0 2,12C2,16.42 4.87,20.17 8.84,21.5C9.34,21.58 9.5,21.27 9.5,21C9.5,20.77 9.5,20.14 9.5,19.31C6.73,19.91 6.14,17.97 6.14,17.97C5.68,16.81 5.03,16.5 5.03,16.5C4.12,15.88 5.1,15.9 5.1,15.9C6.1,15.97 6.63,16.93 6.63,16.93C7.5,18.45 8.97,18 9.54,17.76C9.63,17.11 9.89,16.67 10.17,16.42C7.95,16.17 5.62,15.31 5.62,11.5C5.62,10.39 6,9.5 6.65,8.79C6.55,8.54 6.2,7.5 6.75,6.15C6.75,6.15 7.59,5.88 9.5,7.17C10.29,6.95 11.15,6.84 12,6.84C12.85,6.84 13.71,6.95 14.5,7.17C16.41,5.88 17.25,6.15 17.25,6.15C17.8,7.5 17.45,8.54 17.35,8.79C18,9.5 18.38,10.39 18.38,11.5C18.38,15.32 16.04,16.17 13.81,16.42C14.17,16.73 14.5,17.33 14.5,18.26C14.5,19.6 14.5,20.68 14.5,21C14.5,21.27 14.66,21.59 15.17,21.5C19.14,20.16 22,16.42 22,12A10,10 0 0,0 12,2Z"/></svg><span>GitHub</span></a>
+    <button class="hbtn icon" id="theme" type="button" title="Switch to light mode" aria-label="Switch to light mode"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path id="themeicon" d="M14.3,16L13.6,14H10.4L9.7,16H7.8L11,7H13L16.2,16H14.3M20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31L23.31,12L20,8.69M10.85,12.65H13.15L12,9L10.85,12.65Z"/></svg></button>
+  </div>
+</header>
+
+<nav class="steps" aria-label="Guide steps">
+  <div class="wrap">
+    <div role="tablist" aria-label="Guide steps" id="tablist">
+      <button role="tab" id="tab-1" aria-controls="p1"><span class="n">1</span>Why</button>
+      <button role="tab" id="tab-2" aria-controls="p2"><span class="n">2</span>The name</button>
+      <button role="tab" id="tab-3" aria-controls="p3"><span class="n">3</span>How a run works</button>
+      <button role="tab" id="tab-4" aria-controls="p4"><span class="n">4</span>Simulator</button>
+      <button role="tab" id="tab-5" aria-controls="p5"><span class="n">5</span>Decision rules</button>
+      <button role="tab" id="tab-6" aria-controls="p6"><span class="n">6</span>Data versions</button>
+      <button role="tab" id="tab-7" aria-controls="p7"><span class="n">7</span>Lineage</button>
+      <button role="tab" id="tab-8" aria-controls="p8"><span class="n">8</span>Modes and safety</button>
+      <button role="tab" id="tab-9" aria-controls="p9"><span class="n">9</span>Docs</button>
+    </div>
+  </div>
+  <div class="track" role="progressbar" aria-label="Guide progress" aria-valuemin="1" aria-valuemax="9" aria-valuenow="1" id="prog"><div class="fill" id="progfill"></div></div>
+</nav>
+
+<main id="main" class="wrap" tabindex="-1">
+
+<!-- 1 WHY -->
+<section role="tabpanel" id="p1" aria-labelledby="tab-1" hidden>
+  <div class="ph">
+    <h2>Scheduled runs rebuild everything</h2>
+    <p class="lead">A scheduled dbt run builds every model in scope, even when its code and its inputs are the same as yesterday. hodor checks each node first and reuses what did not change.</p>
+  </div>
+  <div class="stage">
+    <div class="col">
+      <div class="card">
+        <h3>An example</h3>
+        <p>The daily run of a large Databricks project (illustrative figures):</p>
+        <div class="row">
+          <div class="stat"><b>2,400</b><span>models</span></div>
+          <div class="stat"><b>6,800</b><span>tests</span></div>
+          <div class="stat"><b>~7 h</b><span>busy, about 02:00 to 09:00 UTC</span></div>
+        </div>
+        <div class="timeline" role="img" aria-label="A 24 hour bar. The warehouse is busy from 02:00 to 09:00 UTC.">
+          <div class="busy">busy</div>
+          <span class="tick" style="left:0;top:-24px">00:00</span>
+          <span class="tick" style="left:8.333%">02:00</span>
+          <span class="tick" style="left:37.5%">09:00</span>
+          <span class="tick" style="left:100%;top:-24px;transform:translateX(-100%)">24:00</span>
+        </div>
+        <p>Every night the run builds all of it again. Most nodes read the same data as the day before.</p>
+      </div>
+      <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log1" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h3>What hodor changes</h3>
+        <p>For each node hodor asks two questions: did the code change, and did new data arrive upstream? If both answers are no, the node keeps the table it already has.</p>
+        <div class="cells" id="cells" aria-hidden="true"></div>
+        <p class="small" style="margin-top:8px">Illustration only, not a measurement. Move the slider to change the share of nodes with changed code or new upstream data.</p>
+        <label for="chg">Nodes that must rebuild: <b id="chgv">10%</b></label>
+        <input type="range" id="chg" min="0" max="100" value="10">
+        <p id="cellsum" class="small" aria-live="polite"></p>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>Status: early development.</b> The engine and the stores pass end-to-end tests on dbt-duckdb, and a live test on a Databricks Unity Catalog workspace. It has not run in a large production project yet. Start in shadow mode (tab 8) to see its decisions before it skips anything.</div>
+</section>
+
+<!-- 2 NAME -->
+<section role="tabpanel" id="p2" aria-labelledby="tab-2" hidden>
+  <div class="ph">
+    <h2>The name</h2>
+    <p class="lead">hodor is a backronym. One name, one job.</p>
+  </div>
+  <div class="stage">
+    <div class="col">
+      <div class="letters" role="img" aria-label="H, O, D, O, R: Hold Old Data, Or Rebuild">
+        <div><b>H</b><span>Hold</span></div><div><b>O</b><span>Old</span></div><div><b>D</b><span>Data</span></div><div><b>O</b><span>Or</span></div><div><b>R</b><span>Rebuild</span></div>
+      </div>
+      <div class="card">
+        <h3>One job: hold the door</h3>
+        <p>hodor holds the door in front of your warehouse, and that is the only decision it makes, once per node.</p>
+        <p>A node gets through to a rebuild only when its code changed or new data arrived upstream. Everything else keeps the data it already has.</p>
+        <p class="small">The logo is original artwork.</p>
+      </div>
+      <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log2" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <svg class="door" viewBox="0 0 360 236" role="img" aria-label="Four nodes walk toward a door. Two with no change stop at the bar. Two with changed code or new data pass through to a rebuild.">
+          <rect x="0" y="0" width="360" height="236" rx="10" fill="var(--panel2)"/>
+          <defs><linearGradient id="doorgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--door1)"/><stop offset="1" style="stop-color:var(--door2)"/></linearGradient></defs>
+          <path d="M168 200V70a22 22 0 0 1 44 0v130z" fill="url(#doorgrad)"/>
+          <path class="plank" d="M182.7 53V200M197.3 53V200"/>
+          <circle class="stud" cx="175.3" cy="82" r="2.2"/><circle class="stud" cx="175.3" cy="182" r="2.2"/><circle class="stud" cx="204.7" cy="82" r="2.2"/><circle class="stud" cx="204.7" cy="182" r="2.2"/>
+          <rect class="doorbar" x="150" y="104" width="80" height="9" rx="2"/>
+          <g transform="translate(162.5 18.3) scale(.55)"><path class="raven" d="M10 54L30 42C36 30 50 24 60 27C63 21 72 21 76 26L91 30L78 34C77 40 73 44 68 47C64 51 56 50 50 49Z"/><path class="raven-legs" d="M56 48V54M62 47V54"/><circle class="eye" cx="70.5" cy="27.5" r="1.9"/></g>
+          <text x="190" y="229" text-anchor="middle" font-size="12" style="fill:var(--dim)">rebuild</text>
+          <text x="40" y="229" text-anchor="middle" font-size="12" style="fill:var(--dim)">dbt run</text>
+          <g class="pk stop"><rect x="6" y="20" width="34" height="22" rx="5"/></g>
+          <text class="lbl stop" x="6" y="57">no change: reuse</text>
+          <g class="pk go"><rect x="6" y="70" width="34" height="22" rx="5"/></g>
+          <text class="lbl go" x="6" y="107">code changed: build</text>
+          <g class="pk stop"><rect x="6" y="120" width="34" height="22" rx="5"/></g>
+          <text class="lbl stop" x="6" y="157">no new data: reuse</text>
+          <g class="pk go"><rect x="6" y="170" width="34" height="22" rx="5"/></g>
+          <text class="lbl go" x="6" y="207">new upstream data: build</text>
+        </svg>
+        <p class="small">Teal nodes stop at the bar and are reused. Amber nodes pass and are built.</p>
+        <p class="small" id="doornote" hidden>Animations are off in your system settings. <button class="btn" id="doorplay" type="button">&#9654; Play</button></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 HOW A RUN WORKS -->
+<section role="tabpanel" id="p3" aria-labelledby="tab-3" hidden>
+  <div class="ph">
+    <h2>How a run works</h2>
+    <p class="lead">hodor runs inside the dbt process as a plugin. Step through one run, or press Play.</p>
+  </div>
+  <div class="stage w3">
+    <div class="col">
+      <div class="card dg"><svg id="flow" viewBox="0 0 740 216" role="group" aria-label="Run flow diagram, 12 steps"></svg></div>
+      <div class="ctrl" role="group" aria-label="Run flow controls">
+        <button class="btn" id="frestart" type="button">&#8634; Restart</button>
+        <button class="btn" id="fprev" type="button">&#9664; Back</button>
+        <button class="btn primary" id="fplay" type="button">&#9654; Play</button>
+        <button class="btn" id="fnext" type="button">Step &#9654;</button>
+        <span class="prog2" id="fprog" aria-live="polite"></span>
+      </div>
+      <p class="small help">Play runs the remaining steps by itself; press Pause to stop. Step shows exactly one more step. Back goes one step back. Restart returns to step 1.</p>
+      <details class="more"><summary>Fast path</summary><p class="small">When the compiled SQL text equals the text of the last build, hodor takes the stored analysis and skips sqlglot. Hashing a project of about 15,000 models then takes about 0.2 s instead of about 7 minutes (measured on a sample, single thread).</p></details>
+    </div>
+    <div class="col">
+      <div class="card stepinfo" id="flowinfo" aria-live="off"></div>
+      <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log3" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3b SIMULATOR -->
+<section role="tabpanel" id="p4" aria-labelledby="tab-4" hidden>
+  <div class="ph">
+    <h2>Simulator</h2>
+    <p class="lead">Pick a scenario and watch a dbt run, line by line. The log follows the output format of the end-to-end tests on dbt-duckdb. The lines are simulated, not recorded.</p>
+  </div>
+  <div class="scen" id="simscen" role="group" aria-label="Scenario"></div>
+  <p id="simdesc" class="simdesc" aria-live="polite"></p>
+  <div class="stage w4">
+    <div class="col">
+      <div class="card dg">
+        <svg id="simdag" viewBox="0 0 360 252" aria-hidden="true" focusable="false"></svg>
+        <div class="legend"><span>Dashed amber: running</span><span>Teal: reused or replayed</span><span>Amber: built or ran</span><span>Dashed teal: could reuse (shadow)</span><span>Red: fail-open error</span></div>
+      </div>
+      <details class="more"><summary>How the numbers are simulated</summary>
+        <p class="small">Queries: hodor reads the state once, runs one DESCRIBE HISTORY per upstream table (2 here), one refresh read per built table and one insert per 500 records. A built model counts 2 queries, a built test 1, a reused node 0. Wall clock: built nodes take fixed example times (views 1.2 s, tables 4.8 to 6.5 s, tests 2.4 s), a reused node 0.01 s, plus 1.1 s for hodor at the start and 0.4 s for the insert. Compute: 4 compute-seconds per second of a built node, 0.5 per hodor query. The comparison column is the same run with every node built and no hodor.</p>
+      </details>
+    </div>
+    <div class="col">
+      <div class="ctl ctrl">
+        <button class="btn" id="srestart" type="button">&#8634; Restart</button>
+        <button class="btn" id="sback" type="button">&#9664; Back</button>
+        <button class="btn primary" id="splay" type="button">&#9654; Play</button>
+        <button class="btn" id="sstep" type="button">Step &#9654;</button>
+        <label for="sspeed" class="small">Speed</label>
+        <select id="sspeed"><option value="1000">Slow</option><option value="500" selected>Normal</option><option value="150">Fast</option></select>
+        <span class="prog2" id="sprog" aria-live="polite"></span>
+      </div>
+      <div class="xpl" role="group" aria-label="Explain a model after the run">
+        <span class="small"><b>Then ask why</b> (finishes the run): <code>dbt-hodor explain -s</code></span>
+        <button class="btn" type="button" data-x="stg" aria-pressed="false">stg_orders</button>
+        <button class="btn" type="button" data-x="fct" aria-pressed="false">fct_orders</button>
+        <button class="btn" type="button" data-x="inc" aria-pressed="false">inc_orders</button>
+      </div>
+      <p class="small help"><span id="snote"></span> Play prints the rest, Pause stops. Step adds one line, Back removes one, Restart clears the log.</p>
+      <div class="metrics">
+        <p class="small mcap"><b>Run metrics</b> (simulated, illustrative, not measured)</p>
+        <div class="meters compact" id="smeters"></div>
+      </div>
+      <div class="term" id="term" role="log" tabindex="0" aria-label="Simulated dbt log"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 DECISION RULES -->
+<section role="tabpanel" id="p5" aria-labelledby="tab-5" hidden>
+  <div class="ph">
+    <h2>Decision rules</h2>
+    <p class="lead">The engine checks the rules in order. The first match decides. Pick a scenario to see the path.</p>
+  </div>
+  <div class="stage">
+    <div class="col">
+      <div class="scen" id="scen" role="group" aria-label="Scenarios"></div>
+      <label><input type="checkbox" id="shadow"> Shadow mode (rule 1)</label>
+      <div class="result" id="result" aria-live="polite"></div>
+      <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log5" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
+    </div>
+    <div class="col scroll" id="ladderbox" tabindex="0" role="region" aria-label="Rules in order">
+      <ol class="ladder" id="ladder"></ol>
+    </div>
+  </div>
+</section>
+
+<!-- 5 DATA VERSIONS -->
+<section role="tabpanel" id="p6" aria-labelledby="tab-6" hidden>
+  <div class="ph">
+    <h2>Data versions</h2>
+    <p class="lead">hodor does not trust file timestamps. It asks each table for a data version, a token it compares for equality with the token recorded at the last build.</p>
+  </div>
+  <div class="stage">
+    <div class="col">
+      <div class="card fill">
+        <h3>Delta table history</h3>
+        <p>The token is the version and the commit time of the latest commit that changed data, so a recreated table whose versions restart still counts as changed. Maintenance commits never count. Other commits count, unless all their row metrics are 0.</p>
+        <div class="row">
+          <button class="btn primary" id="scan" type="button">Find the token</button>
+          <button class="btn" data-add="OPTIMIZE" type="button">+ OPTIMIZE</button>
+          <button class="btn" data-add="INSERT" type="button">+ INSERT 50 rows</button>
+          <button class="btn" data-add="MERGE0" type="button">+ MERGE, 0 rows</button>
+          <button class="btn" data-add="PROPS" type="button">+ SET TBLPROPERTIES</button>
+        </div>
+        <ul class="log" id="log" aria-label="Delta commit log, newest first" tabindex="0"></ul>
+        <div class="tok" id="tok" aria-live="polite"></div>
+        <div class="row"><button class="btn" id="built" type="button">Node builds now</button><button class="btn" id="reset" type="button">Reset</button></div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h3>Maintenance operations that never count</h3>
+        <p><code>OPTIMIZE</code>, <code>VACUUM START</code>, <code>VACUUM END</code>, <code>ANALYZE</code>, <code>COMPUTE STATS</code>, <code>SET TBLPROPERTIES</code>, <code>UNSET TBLPROPERTIES</code>, <code>CHANGE COLUMN</code>, <code>ADD CONSTRAINT</code>, <code>DROP CONSTRAINT</code>, <code>UPGRADE PROTOCOL</code>, <code>SET TAGS</code>, <code>UNSET TAGS</code>, <code>CLUSTER BY</code>, <code>REORG</code>, <code>FSCK</code>.</p>
+        <details class="more"><summary>Row metrics and the commit window</summary>
+          <p class="small">Row metrics that decide the zero-row case: <code>numOutputRows</code>, <code>numTargetRowsInserted</code>, <code>numTargetRowsUpdated</code>, <code>numTargetRowsDeleted</code>, <code>numDeletedRows</code>, <code>numUpdatedRows</code>, <code>numCopiedRows</code>. A commit with none of them counts as a change.</p>
+          <p class="small">Only the newest 20 commits are read (<code>DESCRIBE HISTORY ... LIMIT 20</code>). If none of them changed data, the version is unknown and dependents build. An unknown operation name counts as a change: that can cause an extra build, never a wrong reuse.</p>
+        </details>
+      </div>
+      <div class="card">
+        <h3>DuckDB content fingerprint</h3>
+        <p>DuckDB has no table history. The token is the row count plus an order-independent sum of row hashes. Reordering rows keeps the token. Changing a value changes it. This suits local test data.</p>
+        <div class="fp" id="fp" aria-live="polite"></div>
+        <div class="row">
+          <button class="btn" data-fp="shuffle" type="button">Reorder rows</button>
+          <button class="btn" data-fp="edit" type="button">Edit a value</button>
+          <button class="btn" data-fp="add" type="button">Add a row</button>
+          <button class="btn" data-fp="reset" type="button">Reset</button>
+        </div>
+      </div>
+      <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log6" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 LINEAGE -->
+<section role="tabpanel" id="p7" aria-labelledby="tab-7" hidden>
+  <div class="ph">
+    <h2>Lineage</h2>
+    <p class="lead">To know if upstream data changed, hodor needs the tables a node really reads. Sources and tables have their own version. Views and ephemerals have none, so hodor looks through them.</p>
+  </div>
+  <div class="stage">
+    <div class="col">
+      <div class="card dg">
+        <svg id="dag" viewBox="0 0 720 196" role="group" aria-label="Example lineage graph"></svg>
+        <div class="legend"><span>Dashed outline: looked through.</span><span>Teal: its own version is used.</span><span>Red: unknown.</span></div>
+      </div>
+      <div class="scen" id="dagpick" role="group" aria-label="Pick a node"></div>
+      <div class="result" id="dagres" aria-live="polite"></div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <ul class="small bullets">
+          <li>A <code>delta.&#96;path&#96;</code> input has a version from its own Delta history.</li>
+          <li><code>read_files(...)</code> and other table functions have no version. The node always builds.</li>
+          <li>One unknown input is enough to build the node (<code>unknown_upstream</code>).</li>
+          <li>A non-Delta source, such as a foreign table, is unknown too.</li>
+        </ul>
+      </div>
+      <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log7" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 MODES AND SAFETY -->
+<section role="tabpanel" id="p8" aria-labelledby="tab-8" hidden>
+  <div class="ph">
+    <h2>Modes and safety</h2>
+    <p class="lead">Installing the package skips nothing. The default mode is <code>shadow</code>.</p>
+  </div>
+  <div class="stage">
+    <div class="col">
+      <div class="card">
+        <h3>Mode <span class="small" style="font-weight:400">Illustration with made-up nodes.</span></h3>
+        <div class="modes" role="radiogroup" aria-label="Mode">
+          <label><input type="radio" name="mode" value="off"> <b>off</b><small>patches nothing, writes no records</small></label>
+          <label><input type="radio" name="mode" value="shadow" checked> <b>shadow</b><small>default: decide and record, build everything</small></label>
+          <label><input type="radio" name="mode" value="on"> <b>on</b><small>reuse nodes</small></label>
+        </div>
+        <label><input type="checkbox" id="inject"> Inject an error while deciding node 6</label>
+        <div class="nodes" id="nodes"></div>
+        <div class="summary" id="sumline" aria-live="polite"></div>
+      </div>
+      <div class="metrics">
+        <p class="small mcap"><b>Run metrics</b> (simulated, illustrative, not measured; same model as the Simulator)</p>
+        <div class="meters compact" id="mmeters"></div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h3>Fail open</h3>
+        <p>Every error leads to a build, never to a reuse. hodor never fails a dbt run.</p>
+        <div class="tw"><table>
+          <tr><th>Failure</th><th>Behavior</th></tr>
+          <tr><td>Exception while deciding a node</td><td>Warning, normal build, reason <code>hodor_error</code></td></tr>
+          <tr><td>State store cannot be read</td><td>Warning, the whole run builds</td></tr>
+          <tr><td>State write fails</td><td>Warning; those nodes build next run (<code>no_history</code>)</td></tr>
+          <tr><td>Metadata query fails for a table</td><td>That table is unknown; dependents build</td></tr>
+          <tr><td>Invalid config value</td><td>Warning, default is used</td></tr>
+          <tr><td>Ctrl+C or job cancel</td><td>Queued records are flushed if possible</td></tr>
+        </table></div>
+      </div>
+      <div class="card">
+        <h3>Tests are replayed</h3>
+        <p>When nothing a test checks has changed, hodor returns the recorded result (pass, warn or fail) with the recorded failure count. The result line shows <code>replayed</code>. <code>lag_tolerance</code> is always 0 for tests.</p>
+        <pre><code>7 of 8 PASS not_null_fct_orders_id ......... [PASS (replayed) in 0.02s]</code></pre>
+      </div>
+      <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log8" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 DOCS -->
+<section role="tabpanel" id="p9" aria-labelledby="tab-9" hidden>
+  <div class="docs">
+    <div class="toc" role="group" aria-label="Docs sections">
+      <button class="btn" type="button" data-to="d-what">What it is</button>
+      <button class="btn" type="button" data-to="d-install">Install</button>
+      <button class="btn" type="button" data-to="d-node">Node configs</button>
+      <button class="btn" type="button" data-to="d-settings">Settings</button>
+      <button class="btn" type="button" data-to="d-store">State store</button>
+      <button class="btn" type="button" data-to="d-reasons">Reason codes</button>
+      <button class="btn" type="button" data-to="d-cli">CLI</button>
+      <button class="btn" type="button" data-to="d-scope">Scope of v1</button>
+      <button class="btn" type="button" data-to="d-limit">Known limit</button>
+    </div>
+    <div class="docbody" id="docbody" tabindex="0" role="region" aria-label="Docs">
+  <h2>Docs</h2>
+  <div class="note"><b>Early development.</b> The engine and stores pass end-to-end tests on dbt-duckdb and a live test on Databricks. Not yet proven in a large production project.</div>
+
+  <h3 id="d-what">What it is</h3>
+  <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, and dbt-duckdb for local development and tests.</p>
+
+  <h3 id="d-install">Install</h3>
+  <p>The package is not on any index yet. Build a wheel and install it in the environment where dbt runs. dbt loads any installed module named <code>dbt_*</code> that has a <code>plugins</code> list, so there is nothing to configure in dbt.</p>
+<pre><code>uv build
+pip install dist/dbt_hodor-0.1.0-py3-none-any.whl
+# local DuckDB state store:
+pip install "dist/dbt_hodor-0.1.0-py3-none-any.whl[duckdb]"</code></pre>
+  <p>Requires Python 3.10 or newer. If upstream <code>dbt_state</code> is also installed, hodor disables itself with a warning.</p>
+
+  <h3 id="d-node">Node configs</h3>
+  <p>Set them under <code>state:</code> in YAML (same block as dbt State).</p>
+<pre><code># dbt_project.yml
+models:
+  my_project:
+    +state:
+      lag_tolerance: 4h
+      require_fresh_data_from: any</code></pre>
+  <div class="tw"><table>
+    <tr><th>Key</th><th>Default</th><th>Values</th></tr>
+    <tr><td><code>lag_tolerance</code></td><td><code>45m</code></td><td><code>0s</code>, <code>45m</code>, <code>4h</code>, <code>1d</code>, <code>1w</code>, integer seconds, or <code>{count: 4, period: hour}</code></td></tr>
+    <tr><td><code>require_fresh_data_from</code></td><td><code>any</code></td><td><code>any</code>: build when any upstream has new data. <code>all</code>: build only when all have.</td></tr>
+    <tr><td><code>compare_unrendered_code</code></td><td><code>false</code></td><td><code>true</code>: build only when both the rendered and the unrendered code changed</td></tr>
+    <tr><td><code>execute_hooks_on_any_reuse</code></td><td><code>false</code></td><td><code>true</code>: run pre- and post-hooks on a reused node (<code>execute_hooks_on_reuse</code> also accepted)</td></tr>
+    <tr><td><code>evaluate_volatile_sql</code></td><td>auto</td><td>auto: <code>current_date()</code>, <code>current_user()</code>, <code>current_timestamp()</code> and similar functions count as a changing upstream unless they only fill a stamp column; <code>true</code>: stamps count too; <code>false</code>: never (dbt State default)</td></tr>
+  </table></div>
+  <p><code>pre_clone</code>, <code>allow_clones</code> and <code>defer_to_target</code> are accepted and ignored, with a warning.</p>
+
+  <h3 id="d-settings">Settings</h3>
+  <p>Set them on the <code>profiles.yml</code> target. An environment variable overrides the profile key. Name parts may contain letters, digits, <code>_</code> and <code>-</code>; hodor always quotes them.</p>
+  <div class="tw"><table>
+    <tr><th>Profile key</th><th>Env var</th><th>Default</th><th>Values</th></tr>
+    <tr><td><code>hodor_mode</code></td><td><code>HODOR_MODE</code></td><td><code>shadow</code></td><td><code>off</code>, <code>shadow</code>, <code>on</code></td></tr>
+    <tr><td><code>hodor_store</code></td><td><code>HODOR_STORE</code></td><td><code>delta</code></td><td><code>delta</code>, <code>duckdb</code>, <code>postgres</code> (alias <code>lakebase</code>)</td></tr>
+    <tr><td><code>hodor_database</code></td><td><code>HODOR_DATABASE</code></td><td>the target's catalog, for <code>delta</code> only</td><td>Databricks catalog, or Postgres database (required); not used by <code>duckdb</code></td></tr>
+    <tr><td><code>hodor_schema</code></td><td><code>HODOR_SCHEMA</code></td><td>none for <code>delta</code> and <code>postgres</code> (required); <code>main</code> for <code>duckdb</code></td><td>schema name</td></tr>
+    <tr><td><code>hodor_table</code></td><td><code>HODOR_TABLE</code></td><td><code>hodor_state</code></td><td>table name</td></tr>
+    <tr><td><code>hodor_path</code></td><td><code>HODOR_PATH</code></td><td><code>.hodor/state.duckdb</code></td><td>DuckDB file, for <code>duckdb</code></td></tr>
+    <tr><td><code>hodor_metadata_threads</code></td><td><code>HODOR_METADATA_THREADS</code></td><td><code>8</code></td><td>1 to 64</td></tr>
+    <tr><td><code>hodor_lookback_days</code></td><td><code>HODOR_LOOKBACK_DAYS</code></td><td><code>90</code></td><td>1 to 3650</td></tr>
+    <tr><td><code>hodor_endpoint</code></td><td><code>HODOR_ENDPOINT</code></td><td>none</td><td>Lakebase endpoint path, <code>projects/&lt;p&gt;/branches/&lt;b&gt;/endpoints/&lt;e&gt;</code>. Supplies host, user and OAuth token</td></tr>
+    <tr><td><code>hodor_host</code>, <code>hodor_port</code>, <code>hodor_user</code>, <code>hodor_password</code>, <code>hodor_sslmode</code></td><td><code>HODOR_HOST</code> and so on</td><td>port <code>5432</code>, sslmode <code>require</code></td><td>For a Postgres that is not Lakebase. Keep the password in an environment variable</td></tr>
+  </table></div>
+<pre><code># profiles.yml
+my_project:
+  target: prod
+  outputs:
+    prod:
+      type: databricks
+      catalog: my_catalog
+      # ... connection settings ...
+      hodor_mode: shadow
+      hodor_schema: my_ops_schema
+    local:
+      type: duckdb
+      path: dev.duckdb
+      hodor_store: duckdb</code></pre>
+
+  <h3 id="d-store">State store</h3>
+  <p>An append-only table with one record per node per run. The <code>delta</code> table is <code>&lt;catalog&gt;.&lt;schema&gt;.hodor_state</code>, clustered by <code>(target_name, node_key)</code>. The schema must exist: hodor creates only the table. The <code>duckdb</code> store is a local file that hodor creates. The <code>postgres</code> store holds state in any Postgres, Databricks Lakebase included, and creates its schema and table on first use.</p>
+  <p>The state table decides what is skipped in prod. Grant <code>MODIFY</code> on it only to the job service principals. Without <code>hodor_schema</code>, the <code>delta</code> store turns hodor off with a warning. Cleanup is manual: <code>DELETE FROM hodor_state WHERE recorded_at_ms &lt; &lt;cutoff&gt;</code>, then <code>VACUUM</code> on Delta.</p>
+
+  <h3 id="d-reasons">Reason codes</h3>
+  <p>First match wins. Shadow mode builds anyway and records the decision.</p>
+  <div class="tw"><table id="reasons"><tr><th>#</th><th>Reason</th><th>Decision</th></tr></table></div>
+
+  <h3 id="d-cli">CLI</h3>
+  <p><code>dbt-hodor explain</code> shows why each node of the latest run was reused or built: the reason, the last build it was compared with, the code and config hashes then and now, and each upstream data version then and now. It only reads the state table. Options: <code>-s</code> (a unique_id, a relation or a name; repeat for more nodes), <code>--invocation</code>, <code>--json</code>, and dbt's <code>--project-dir</code>, <code>--profiles-dir</code>, <code>--profile</code> and <code>-t</code>. Try it in the Simulator tab.</p>
+<pre><code>$ dbt-hodor explain -s fct_orders
+dbt-hodor explain: hodor_e2e/local, invocation 7d1e4b90-... (2026-10-21 20:42 UTC), 1 node
+model.hodor_e2e.fct_orders: build (new_upstream_data)
+  last build   2026-10-20 20:41 UTC, invocation 1f0c2a7e-...
+  code hash    same (qualify:6c1f02aa)
+  config hash  same (e56f2a83)
+  upstream     raw.orders: 14@1792465200000 -&gt; 15@1792551600000</code></pre>
+  <p><code>dbt-hodor ddl</code> prints the <code>CREATE TABLE</code> statement of the state table, for manual creation.</p>
+  <p><code>dbt-hodor prune</code> deletes the old records of this project and target. It is a dry run unless you pass <code>--yes</code>, and <code>--keep-days N</code> sets the window to keep (default <code>hodor_lookback_days</code>). Records of other projects and targets in the same table are never touched.</p>
+<pre><code>$ dbt-hodor prune --keep-days 30
+Would delete 1284 records: hodor_e2e/local, records older than 30 days.
+Run again with --yes to delete them.</code></pre>
+  <p>Result lines carry the reason too:</p>
+<pre><code>4 of 8 REUSED sql table model main.fct_orders ......... [REUSED (no_new_data) in 0.01s]
+4 of 8 OK created sql table model main.fct_orders ......... [OK (new_upstream_data) in 0.07s]
+4 of 8 OK created sql table model main.fct_orders ......... [OK (shadow, could reuse: no_new_data) in 0.06s]
+7 of 8 PASS not_null_fct_orders_id ......... [PASS (replayed) in 0.02s]</code></pre>
+  <p>The last line of a run: <code>dbt-hodor: N reused, M built, K fail-open errors</code>. In shadow mode: <code>dbt-hodor: N could be reused, M need a build (shadow: all built), K fail-open errors</code>.</p>
+
+  <h3 id="d-scope">Scope of v1</h3>
+  <p>Commands: <code>run</code>, <code>build</code>, <code>test</code>, <code>seed</code> and <code>snapshot</code>.</p>
+  <p>Supported: models materialized as <code>table</code>, <code>incremental</code> and <code>view</code>, plus seeds, snapshots and data tests. Incremental strategies: <code>append</code>, <code>merge</code>, <code>delete+insert</code>, <code>insert_overwrite</code> and <code>replace_where</code>; an unset strategy counts as <code>merge</code>.</p>
+  <p>Built as plain dbt: clones, deferral, Python models, microbatch, materialized views, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.</p>
+  <p>A seed is reused when the CSV content (sha256 of the file, line endings normalized) and its config are unchanged and its table was not written outside dbt. A snapshot follows the table rules: code, config and upstream data unchanged, and its target not written outside dbt. <code>lag_tolerance</code> applies to snapshots too.</p>
+
+  <h3 id="d-limit">Known limit</h3>
+  <div class="note">A change to a materialization macro, for example a dbt-databricks upgrade, does not show in the compiled SQL. Run once with <code>HODOR_MODE=off</code> after such an upgrade.</div>
+    </div>
+  </div>
+</section>
+
+<nav class="pager" aria-label="Switch tab">
+  <button class="btn" id="prev" type="button">&larr; Previous</button>
+  <span class="small"><span id="progtxt" aria-live="polite">Step 1 of 9</span> &middot; switch tab with <kbd>&larr;</kbd> <kbd>&rarr;</kbd></span>
+  <button class="btn" id="next" type="button">Next &rarr;</button>
+</nav>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Apache-2.0. Attribution and trademarks: see <code>NOTICE</code> in the repository.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) {
+    $('#doornote').hidden = false;
+    $('#doorplay').addEventListener('click', function () {
+      var door = $('svg.door');
+      door.classList.remove('play');
+      void door.getBoundingClientRect(); // restart the animation
+      door.classList.add('play');
+    });
+  }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function el(name, attrs, parent, text) {
+    var e = document.createElementNS(SVGNS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function hel(tag, cls, parent, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function ln(pre, br, wd) { return pre + ' ' + new Array(Math.max(3, (wd || 52) - pre.length) + 1).join('.') + ' [' + br + ']'; }
+  function setLog(id, lines) {
+    var t = $(id); if (!t) return;
+    t.textContent = '';
+    lines.forEach(function (l) { hel('div', l[0], t, l[1]); });
+    t.scrollTop = t.scrollHeight;
+  }
+  function f1(x) { return (Math.round(x * 10) / 10).toFixed(1); }
+  // d: started, shadow, M, reuse (reused or could reuse), built, errs, q, qb, t, tb, cs, csb, done
+  function renderTiles(box, d) {
+    box.textContent = '';
+    var dash = '\u2014';
+    function tile(label, val, sub, pct) {
+      var t = hel('div', 'mt', box);
+      hel('span', 'ml', t, label);
+      hel('b', '', t, val);
+      if (pct != null) { var bar = hel('div', 'mbar', t); hel('i', '', bar).style.width = Math.round(pct * 100) + '%'; }
+      hel('span', 'ms', t, sub);
+    }
+    var on = d.started;
+    tile(d.shadow ? 'Could reuse (shadow)' : 'Nodes reused', on ? d.reuse + ' of ' + d.M : dash, on ? 'built ' + d.built + ' \u00b7 errors ' + d.errs : '', on ? d.reuse / d.M : 0);
+    tile('Warehouse queries', on ? String(d.q) : dash, 'without hodor: ' + (on ? d.qb : dash));
+    tile('Wall clock', on ? f1(d.t) + ' s' : dash, 'without hodor: ' + (on ? f1(d.tb) + ' s' : dash));
+    var pc = Math.round((1 - d.cs / d.csb) * 100);
+    tile('Warehouse compute', on ? Math.round(d.cs) + ' compute-s' : dash, (d.compact ? 'w/o hodor: ' : 'without hodor: ') + (on ? Math.round(d.csb) : dash) + (on && d.done ? (d.compact ? (pc >= 0 ? ' (\u2212' + pc + '%)' : ' (+' + (-pc) + '%)') : (pc >= 0 ? ' \u00b7 saved ' + pc + '%' : ' \u00b7 ' + (-pc) + '% more')) : ''));
+  }
+  function scrollInto(box, target, pad) {
+    if (box.scrollHeight > box.clientHeight + 2) box.scrollTop = Math.max(0, target.offsetTop - (pad || 4));
+    else target.scrollIntoView({ block: 'nearest' });
+  }
+
+  /* ---------- theme ---------- */
+  // three states like the MkDocs palette toggle: system preference, light, dark
+  var themeBtn = $('#theme'), mq = window.matchMedia('(prefers-color-scheme: light)'), themePref = 'auto';
+  var THEME = {
+    auto: { icon: 'M14.3,16L13.6,14H10.4L9.7,16H7.8L11,7H13L16.2,16H14.3M20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31L23.31,12L20,8.69M10.85,12.65H13.15L12,9L10.85,12.65Z', label: 'Switch to light mode', next: 'light' },
+    light: { icon: 'M12,8A4,4 0 0,0 8,12A4,4 0 0,0 12,16A4,4 0 0,0 16,12A4,4 0 0,0 12,8M12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6A6,6 0 0,1 18,12A6,6 0 0,1 12,18M20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31L23.31,12L20,8.69Z', label: 'Switch to dark mode', next: 'dark' },
+    dark: { icon: 'M12,18C11.11,18 10.26,17.8 9.5,17.45C11.56,16.5 13,14.42 13,12C13,9.58 11.56,7.5 9.5,6.55C10.26,6.2 11.11,6 12,6A6,6 0 0,1 18,12A6,6 0 0,1 12,18M20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31L23.31,12L20,8.69Z', label: 'Switch to system preference', next: 'auto' }
+  };
+  function setTheme(pref, persist) {
+    themePref = pref;
+    var t = pref === 'auto' ? (mq.matches ? 'light' : 'dark') : pref;
+    document.documentElement.setAttribute('data-theme', t);
+    $('#themeicon').setAttribute('d', THEME[pref].icon);
+    themeBtn.title = THEME[pref].label;
+    themeBtn.setAttribute('aria-label', THEME[pref].label);
+    if (!persist) return;
+    try {
+      if (pref === 'auto') localStorage.removeItem('hodor-theme');
+      else localStorage.setItem('hodor-theme', pref);
+    } catch (e) { /* storage may be blocked */ }
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('hodor-theme'); } catch (e) { saved = null; }
+  // the head script already set data-theme; a saved choice wins over the system setting
+  setTheme(saved === 'light' || saved === 'dark' ? saved : 'auto', false);
+  themeBtn.addEventListener('click', function () { setTheme(THEME[themePref].next, true); });
+  if (mq.addEventListener) mq.addEventListener('change', function () {
+    if (themePref === 'auto') setTheme('auto', false);
+  });
+
+  /* ---------- tabs ---------- */
+  var tabs = $$('[role=tab]'), panels = $$('[role=tabpanel]'), N = tabs.length, cur = 0;
+  function show(i) {
+    i = Math.max(0, Math.min(N - 1, i));
+    if (i !== cur) { stopFlow(); stopSim(); }
+    cur = i;
+    tabs.forEach(function (t, k) {
+      var on = k === i;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      panels[k].hidden = !on;
+    });
+    $('#progfill').style.transform = 'scaleX(' + (i + 1) / N + ')';
+    $('#prog').setAttribute('aria-valuenow', i + 1);
+    $('#progtxt').textContent = 'Step ' + (i + 1) + ' of ' + N + ': ' + tabs[i].textContent.replace(/^\d+/, '');
+    $('#prev').disabled = i === 0;
+    $('#next').disabled = i === N - 1;
+    var nm = function (k) { return tabs[k].textContent.replace(/^\d+/, ''); };
+    $('#prev').textContent = i > 0 ? '\u2190 ' + nm(i - 1) : '\u2190 Previous';
+    $('#next').textContent = i < N - 1 ? nm(i + 1) + ' \u2192' : 'Next \u2192';
+    if (i === 2) renderFlow();
+    if (i === 3) initSim();
+  }
+  function fromHash() {
+    var m = /^#\/(\d+)$/.exec(location.hash);
+    if (!m && location.hash && location.hash !== '#') return; // e.g. the skip link: keep the current tab
+    show(m ? parseInt(m[1], 10) - 1 : 0);
+  }
+  function go(i) {
+    i = Math.max(0, Math.min(N - 1, i));
+    if (location.hash === '#/' + (i + 1)) show(i); else location.hash = '#/' + (i + 1);
+  }
+  tabs.forEach(function (t, k) { t.addEventListener('click', function () { go(k); }); });
+  $('#tablist').addEventListener('keydown', function (e) {
+    var k = tabs.indexOf(document.activeElement);
+    if (k < 0) return;
+    if (e.key === 'Home') { e.preventDefault(); go(0); tabs[0].focus(); }
+    if (e.key === 'End') { e.preventDefault(); go(N - 1); tabs[N - 1].focus(); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    var t = e.target, tag = t && t.tagName;
+    if (tag === 'INPUT' && t.type !== 'checkbox' && t.type !== 'radio' && t.type !== 'range') return;
+    if (tag === 'INPUT' && (t.type === 'radio' || t.type === 'range')) return;
+    if (tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      var to = Math.max(0, Math.min(N - 1, cur + (e.key === 'ArrowRight' ? 1 : -1)));
+      go(to);
+      if (t && t.getAttribute && t.getAttribute('role') === 'tab') tabs[to].focus();
+    }
+  });
+  $('#prev').addEventListener('click', function () { go(cur - 1); });
+  $('#next').addEventListener('click', function () { go(cur + 1); });
+  window.addEventListener('hashchange', fromHash);
+
+  /* ---------- tab 1 ---------- */
+  var cells = $('#cells');
+  for (var c = 0; c < 100; c++) hel('i', '', cells);
+  function renderCells() {
+    var p = parseInt($('#chg').value, 10);
+    $$('i', cells).forEach(function (x, k) { x.className = k < p ? '' : 'r'; });
+    $('#chgv').textContent = p + '%';
+    $('#cellsum').textContent = 'Out of 100 nodes: ' + p + ' build (amber), ' + (100 - p) + ' are reused (teal).';
+    setLog('#log1', [
+      ['l-dim', '$ dbt build'],
+      ['l-dim', 'dbt-hodor 0.1.0: mode on, 100 nodes selected (illustration)'],
+      ['l-reuse', ln('(' + (100 - p) + ' nodes) REUSED', 'REUSED (no_new_data)')],
+      ['l-ok', ln('(' + p + ' nodes) OK created', 'OK (code_changed or new_upstream_data)')],
+      ['l-sum', 'dbt-hodor: ' + (100 - p) + ' reused, ' + p + ' built, 0 fail-open errors']
+    ]);
+  }
+  $('#chg').addEventListener('input', renderCells);
+  renderCells();
+
+  setLog('#log2', [
+    ['l-dim', '$ dbt build'],
+    ['l-dim', 'dbt-hodor 0.1.0 is enabled for dbt build'],
+    ['l-reuse', ln('1 of 4 REUSED sql table model main.node_1', 'REUSED (no_new_data) in 0.01s')],
+    ['l-ok', ln('2 of 4 OK created sql table model main.node_2', 'OK (code_changed) in 0.07s')],
+    ['l-reuse', ln('3 of 4 REUSED sql table model main.node_3', 'REUSED (no_new_data) in 0.01s')],
+    ['l-ok', ln('4 of 4 OK created sql table model main.node_4', 'OK (new_upstream_data) in 0.07s')],
+    ['l-sum', 'dbt-hodor: 2 reused, 2 built, 0 fail-open errors']
+  ]);
+
+  /* ---------- tab 3: flow ---------- */
+  var FLOW = [
+    { id: 'start', t: 'dbt starts', s: 'dbt run, build, test, seed or snapshot', d: 'You start dbt as usual. dbt loads every installed module named dbt_* that has a plugins list. hodor needs no wrapper command, so it works in Databricks dbt_task jobs.', y: 10, h: 44 },
+    { id: 'plugin', t: 'Plugin loads', s: 'dbt_hodor initialize()', d: 'hodor reads the mode. With off, or for any command other than run, build, test, seed or snapshot, it installs nothing. Otherwise it patches the model, seed, snapshot and test runners.', y: 76, h: 44 },
+    { id: 'first', t: 'First node: load state', s: '1 query for records, 1 for the clock', d: 'Before the first node runs, one query loads the latest successful build record of every selected node. One more query reads the warehouse clock. Table metadata is prefetched.', y: 142, h: 52 },
+    { id: 'hash', t: 'Hash compiled SQL', s: 'sqlglot, or the fast path', d: 'The compiled SQL is normalized and hashed, so case, quoting, comments and table aliases are not changes. Fast path: if the SQL text equals the last build, the stored analysis is used and sqlglot does not run.', y: 228, h: 44, loop: true },
+    { id: 'cfg', t: 'Compare config', s: 'config hash vs record', d: 'The node config is hashed too. Keys that do not change the data (tags, meta, docs, state, and similar) are left out.', y: 288, h: 44, loop: true },
+    { id: 'up', t: 'Read upstream versions', s: 'data version per upstream table', d: 'Each upstream table gets a data version: from Delta history on Databricks, from a content fingerprint on DuckDB. Results are cached for the run.', y: 348, h: 44, loop: true },
+    { id: 'decide', t: 'Engine decides', s: 'first matching rule wins', d: 'A pure function takes the node facts, the latest record and the upstream versions. It returns REUSE or BUILD with a reason code (tab 5).', y: 408, h: 44, loop: true },
+    { id: 'reuse', t: 'REUSE', s: 'skip the build', d: 'The node returns a Reused result and the materialization never runs. Hooks do not run unless execute_hooks_on_any_reuse is true. Children are not skipped.', x: 40, w: 132, y: 482, h: 44, loop: true, cls: 'reu' },
+    { id: 'build', t: 'BUILD', s: 'run as plain dbt', d: 'The original dbt code runs. Then hodor reads the new data version of the table and updates the run cache, so downstream nodes see it. In shadow mode every node ends here.', x: 188, w: 132, y: 482, h: 44, loop: true, cls: 'bld' },
+    { id: 'rec', t: 'Append record', s: 'one record per node', d: 'A record with the decision, reason, hashes and versions is queued in memory.', y: 552, h: 44, loop: true },
+    { id: 'flush', t: 'Flush', s: 'every 200 records and at run end', d: 'Records are written in batches of 200 and again at the end of the run, also after errors and Ctrl+C. A missing record only causes an extra build later.', y: 640, h: 44 },
+    { id: 'sum', t: 'Summary line', s: 'dbt-hodor: N reused, M built, ...', d: 'The run ends with one line: dbt-hodor: N reused, M built, K fail-open errors. In shadow mode it reads: dbt-hodor: N could be reused, M need a build (shadow: all built), K fail-open errors.', y: 700, h: 44 }
+  ];
+  var EDGES = [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[6,8],[7,9],[8,9],[9,10],[10,11]];
+  var LAY = { start: [0, 8], plugin: [125, 8], first: [250, 8], hash: [375, 8], cfg: [500, 8], up: [625, 8], decide: [625, 125], reuse: [478, 96], build: [478, 154], rec: [331, 125], flush: [184, 125], sum: [37, 125] };
+  var SHORT = { start: 'dbt starts', plugin: 'Plugin loads', first: 'Load state', hash: 'Hash SQL', cfg: 'Config hash', up: 'Upstream data', decide: 'Engine decides', reuse: 'REUSE', build: 'BUILD', rec: 'Append record', flush: 'Flush', sum: 'Summary' };
+  var FLOGS = {
+    start: [['l-dim', '$ dbt build']],
+    plugin: [['l-dim', 'dbt-hodor 0.1.0 is enabled for dbt build']],
+    first: [['l-dim', 'dbt-hodor 0.1.0: mode on, 8 build records for hodor_e2e/local']],
+    hash: [['l-dim', 'dbt-hodor: main.fct_orders code hash equals the record (fast path)']],
+    cfg: [['l-dim', 'dbt-hodor: main.fct_orders config hash equals the record']],
+    up: [['l-dim', 'dbt-hodor: upstream raw.orders data version v41, recorded v41']],
+    decide: [['l-dim', 'dbt-hodor: main.fct_orders: rules checked in order, the first match decides']],
+    reuse: [['l-reuse', ln('2 of 8 REUSED sql table model main.fct_orders', 'REUSED (no_new_data) in 0.01s')]],
+    build: [['l-ok', ln('2 of 8 OK created sql table model main.fct_orders', 'OK (new_upstream_data) in 0.07s')]],
+    rec: [['l-dim', 'dbt-hodor: record queued for main.fct_orders']],
+    flush: [['l-dim', 'dbt-hodor: 8 records written (batches of 200, and at run end)']],
+    sum: [['l-sum', 'dbt-hodor: 3 reused, 5 built, 0 fail-open errors']]
+  };
+  FLOW.forEach(function (n) { n.x = LAY[n.id][0]; n.y = LAY[n.id][1]; n.w = 112; n.h = 46; n.short = SHORT[n.id]; n.lg = FLOGS[n.id]; });
+  var fstep = 0, ftimer = null, flowBuilt = false, fnodes = [];
+  function renderFlow() {
+    var svg = $('#flow');
+    if (!flowBuilt) {
+      flowBuilt = true;
+      var defs = el('defs', {}, svg), mk = el('marker', { id: 'ah', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+      el('path', { d: 'M0 1L10 5L0 9z', 'class': 'ahead' }, mk);
+      el('path', { 'class': 'loop', d: 'M367 2H739V212H325V70H367Z', 'stroke-linejoin': 'round' }, svg);
+      el('text', { x: 733, y: 205, 'font-size': 11, 'text-anchor': 'end', 'class': 'sub' }, svg, 'for each node');
+      EDGES.forEach(function (e) {
+        var a = FLOW[e[0]], b = FLOW[e[1]], x1, y1, x2, y2;
+        if (Math.abs(a.x - b.x) < 5) { x1 = a.x + a.w / 2; y1 = a.y + a.h; x2 = b.x + b.w / 2; y2 = b.y; }
+        else if (b.x > a.x) { x1 = a.x + a.w; y1 = a.y + a.h / 2; x2 = b.x; y2 = b.y + b.h / 2; }
+        else { x1 = a.x; y1 = a.y + a.h / 2; x2 = b.x + b.w; y2 = b.y + b.h / 2; }
+        el('path', { 'class': 'edge', 'marker-end': 'url(#ah)', d: 'M' + x1 + ' ' + y1 + 'L' + x2 + ' ' + y2 }, svg);
+      });
+      FLOW.forEach(function (n, i) {
+        var g = el('g', { 'data-i': i, role: 'button', tabindex: '-1', 'aria-label': 'Step ' + (i + 1) + ': ' + n.t }, svg);
+        if (n.cls) { g.setAttribute('class', n.cls === 'bld' ? 'bld' : 'reu'); g.setAttribute('data-base', n.cls === 'bld' ? 'bld' : 'reu'); }
+        el('rect', { 'class': 'box', x: n.x, y: n.y, width: n.w, height: n.h, rx: 8 }, g);
+        el('text', { x: n.x + n.w / 2, y: n.y + 20, 'text-anchor': 'middle', 'font-size': 12.5, 'font-weight': 700 }, g, n.short);
+        el('text', { x: n.x + n.w / 2, y: n.y + 36, 'text-anchor': 'middle', 'class': 'sub' }, g, 'Step ' + (i + 1));
+        g.addEventListener('click', function () { stopFlow(); fgo(i); });
+        fnodes.push(g);
+      });
+    }
+    fshow();
+  }
+  function fshow() {
+    fnodes.forEach(function (g, i) {
+      var on = i === fstep;
+      var base = g.getAttribute('data-base') || '';
+      g.setAttribute('class', (base + (on ? ' on' : '')).trim());
+    });
+    $$('#flow .edge').forEach(function (p, k) {
+      var hot = EDGES[k][1] === fstep;
+      p.setAttribute('class', 'edge' + (hot ? ' hot' : ''));
+    });
+    var n = FLOW[fstep], box = $('#flowinfo');
+    box.textContent = '';
+    hel('div', 'k', box, 'Step ' + (fstep + 1) + ' of ' + FLOW.length);
+    hel('h3', '', box, n.t);
+    hel('div', 'small', box, n.s);
+    hel('p', '', box, n.d);
+    var lines = [];
+    FLOW.forEach(function (m, i) { if (i <= fstep && !(fstep === 8 && i === 7)) lines = lines.concat(m.lg); });
+    setLog('#log3', lines);
+    $('#fprev').disabled = fstep === 0;
+    $('#fnext').disabled = fstep === FLOW.length - 1;
+    $('#frestart').disabled = fstep === 0;
+    flowUi();
+  }
+  function flowUi() {
+    var end = fstep === FLOW.length - 1;
+    $('#fplay').innerHTML = ftimer ? '&#9208; Pause' : (end ? '&#8635; Replay' : '&#9654; Play');
+    $('#fprog').textContent = 'Step ' + (fstep + 1) + ' of ' + FLOW.length + (end ? ', end of the run' : '');
+  }
+  function fgo(i) { fstep = Math.max(0, Math.min(FLOW.length - 1, i)); fshow(); }
+  function stopFlow() { if (ftimer) { clearInterval(ftimer); ftimer = null; } if (flowBuilt) flowUi(); }
+  $('#fprev').addEventListener('click', function () { stopFlow(); fgo(fstep - 1); });
+  $('#fnext').addEventListener('click', function () { stopFlow(); fgo(fstep + 1); });
+  $('#frestart').addEventListener('click', function () { stopFlow(); fgo(0); });
+  $('#fplay').addEventListener('click', function () {
+    if (ftimer) { stopFlow(); return; }
+    if (fstep === FLOW.length - 1) fgo(0);
+    ftimer = setInterval(function () {
+      fgo(fstep + 1);
+      if (fstep >= FLOW.length - 1) stopFlow();
+    }, 1900);
+    flowUi();
+  });
+
+  /* ---------- tab 4: simulator ---------- */
+  var SI = [
+    { id: 'stg', k: 'm', w: 'sql view model main.stg_orders', name: 'stg_orders' },
+    { id: 'fct', k: 'm', w: 'sql table model main.fct_orders', name: 'fct_orders' },
+    { id: 'inc', k: 'm', w: 'sql incremental model main.inc_orders', name: 'inc_orders' },
+    { id: 't1', k: 't', name: 'not_null_stg_orders_id', par: 'stg' },
+    { id: 't2', k: 't', name: 'unique_stg_orders_id', par: 'stg' },
+    { id: 't3', k: 't', name: 'not_null_inc_orders_id', par: 'inc' },
+    { id: 't4', k: 't', name: 'not_null_fct_orders_id', par: 'fct' },
+    { id: 't5', k: 't', name: 'unique_fct_orders_id', par: 'fct' }
+  ];
+  var BASE = { stg: ['reuse', 'view_unchanged'], fct: ['reuse', 'no_new_data'], inc: ['reuse', 'no_new_data'] };
+  function scn(name, desc, o) {
+    o = o || {};
+    var m = {};
+    Object.keys(BASE).forEach(function (k) { m[k] = (o.m && o.m[k]) || BASE[k]; });
+    var run = {};
+    SI.forEach(function (it) {
+      if (it.k === 't') run[it.id] = m[it.par][0] === 'build' || (o.fresh || []).indexOf(it.par) >= 0;
+    });
+    return { name: name, desc: desc, mode: o.mode || 'on', rec: o.rec == null ? 8 : o.rec, m: m, run: run, tags: o.tags || {}, err: o.err };
+  }
+  var SIMS = [
+    scn('First run (no history)', 'No earlier build records exist, so every node builds and every test runs. This also fills the state table.', { rec: 0, m: { stg: ['build', 'no_history'], fct: ['build', 'no_history'], inc: ['build', 'no_history'] } }),
+    scn('History pruned', 'dbt-hodor prune --keep-days deleted records this run still needed, so every node builds once with no_history and fills the table again. Keep at least hodor_lookback_days to avoid it.', { rec: 0, m: { stg: ['build', 'no_history'], fct: ['build', 'no_history'], inc: ['build', 'no_history'] } }),
+    scn('Nothing changed', 'Same code, no new data. Views and tables are reused, and the tests replay their recorded result.'),
+    scn('New upstream data', 'New rows arrived in raw.orders. The view stays reused because it stores no data. The table builds, and the tests on the view and the table run again.', { m: { fct: ['build', 'new_upstream_data'] }, fresh: ['stg', 'fct'], tags: { src1: 'new rows' } }),
+    scn('Code changed', 'Someone edited the SQL of fct_orders. It builds and its two tests run. Everything else is reused.', { m: { fct: ['build', 'code_changed'] }, tags: { fct: 'SQL edited' } }),
+    scn('Written outside dbt', 'Something wrote to fct_orders outside dbt. Its data version no longer matches the one recorded after the last build, so it builds (target_modified).', { m: { fct: ['build', 'target_modified'] }, tags: { fct: 'written outside' } }),
+    scn('read_files input', 'inc_orders now reads read_files(...). That input has no data version, so hodor cannot prove it is unchanged and builds the model.', { m: { inc: ['build', 'unknown_upstream'] }, tags: { inc: 'read_files(...)' } }),
+    scn('New day', 'inc_orders filters on current_date() - 7. No rows arrived, but the date changed since the last build, so the window moved and inc_orders builds (volatile_sql). fct_orders only stamps current_timestamp() as _loaded_at, which does not count, so it stays reused.', { m: { inc: ['build', 'volatile_sql'] }, tags: { inc: 'current_date() filter', fct: '_loaded_at stamp' } }),
+    scn('Mask changed', 'The column mask on fct_orders changed in YAML. The SQL is the same, but the config hash differs, so fct_orders builds (config_changed) and its tests run.', { m: { fct: ['build', 'config_changed'] }, tags: { fct: 'column_mask edited' } }),
+    scn('Macro override', 'A project override of create_table_as now adds an _audit column. The compiled SQL is the same, but tables and incrementals run that macro, so fct_orders and inc_orders build (config_changed). The view does not run it and stays reused.', { m: { fct: ['build', 'config_changed'], inc: ['build', 'config_changed'] }, tags: { fct: 'create_table_as', inc: 'create_table_as' } }),
+    scn('Source recreated', 'raw.orders was dropped and recreated, so its Delta version restarted at a number seen before. The token holds the commit time too, so fct_orders still sees new data and builds.', { m: { fct: ['build', 'new_upstream_data'] }, fresh: ['stg', 'fct'], tags: { src1: 'recreated' } }),
+    scn('Shadow mode', 'Nothing changed, but the mode is shadow: every node builds. The log shows what hodor could have reused.', { mode: 'shadow' }),
+    scn('Hodor error (fail open)', 'The decision for fct_orders raises an error. hodor logs a warning and builds the model as plain dbt would. The run does not fail.', { m: { fct: ['build', 'hodor_error'] }, err: 'fct', tags: { fct: 'decision error' } })
+  ];
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function stamp(sec) { var t = 35 + sec; return '20:' + pad2(42 + Math.floor(t / 60)) + ':' + pad2(t % 60) + '  '; }
+  function dots(pre) { return new Array(Math.max(3, 64 - pre.length) + 1).join('.'); }
+  var SIT = { stg: 1.2, fct: 6.5, inc: 4.8 };
+  // every node built, no hodor: 3 models x 2 queries + 5 tests x 1; 12.5 s + 5 x 2.4 s; 4 compute-s per second
+  var SIMBASE = { qb: 11, tb: 24.5, csb: 98 };
+  function genSim(sc) {
+    var ev = [], sec = 0, c = { a: 0, b: 0, e: 0, d: 0 }, m = { q: 0, t: 0, cs: 0 }, okm = 0, rum = 0, shadow = sc.mode === 'shadow', states = {};
+    function push(text, cls, node, st, noTime) {
+      if (st) states[node] = st;
+      ev.push({ text: (noTime ? '' : stamp(sec)) + text, cls: cls, a: c.a, b: c.b, e: c.e, d: c.d, q: m.q, t: m.t, cs: m.cs, st: JSON.parse(JSON.stringify(states)) });
+    }
+    function line(pre, br) { return pre + ' ' + dots(pre) + ' [' + br + ']'; }
+    // simulated cost model, see the "How the numbers are simulated" note
+    function bill(it, built) {
+      var tm = it.k === 't' ? 2.4 : SIT[it.id];
+      if (!built) { m.t += 0.01; return; }
+      m.q += it.k === 'm' ? 2 : 1; m.t += tm; m.cs += 4 * tm;
+      if (it.k === 'm' && it.id !== 'stg') { m.q += 1; m.t += 0.2; m.cs += 0.5; }
+    }
+    push('$ dbt build', 'l-dim', null, null, true);
+    push('dbt-hodor 0.1.0 is enabled for dbt build', 'l-dim');
+    m.q += 3; m.t += 1.1; m.cs += 1.5;
+    push('dbt-hodor 0.1.0: mode ' + sc.mode + ', ' + sc.rec + ' build records for hodor_e2e/local', 'l-dim');
+    sec += 2;
+    SI.forEach(function (it, ix) {
+      var i = (ix + 1) + ' of 8', label = it.k === 'm' ? it.w : 'test ' + it.name;
+      push(line(i + ' START ' + label, 'RUN'), 'l-dim', it.id, 's-run');
+      if (it.k === 'm') {
+        var dec = sc.m[it.id][0], why = sc.m[it.id][1], could = dec === 'reuse';
+        if (sc.err === it.id) { push('dbt-hodor: deciding model.hodor_e2e.' + it.name + ' failed, building it: KeyError: \'upstreams\' (simulated)', 'l-warn'); c.e++; }
+        if (shadow) {
+          sec++; okm++; c.d++; bill(it, true);
+          if (could) c.a++; else c.b++;
+          push(line(i + ' OK created ' + it.w, 'OK (' + (could ? 'shadow, could reuse: ' : '') + why + ') in 0.06s'), 'l-ok', it.id, could ? 's-ghost' : 's-build');
+        } else if (could) {
+          rum++; c.a++; c.d++; bill(it, false);
+          push(line(i + ' REUSED ' + it.w, 'REUSED (' + why + ') in 0.01s'), 'l-reuse', it.id, 's-reuse');
+        } else {
+          sec++; okm++; c.b++; c.d++; bill(it, true);
+          push(line(i + ' OK created ' + it.w, 'OK (' + why + ') in 0.07s'), 'l-ok', it.id, sc.err === it.id ? 's-err' : 's-build');
+        }
+      } else if (!shadow && !sc.run[it.id]) {
+        c.a++; c.d++; bill(it, false);
+        push(line(i + ' PASS ' + it.name, 'PASS (replayed) in 0.02s'), 'l-reuse', it.id, 's-reuse');
+      } else {
+        sec++; c.b++; c.d++; bill(it, true);
+        push(line(i + ' PASS ' + it.name, 'PASS in 0.03s'), 'l-ok', it.id, 's-build');
+      }
+    });
+    sec++;
+    m.q += 1; m.t += 0.4; m.cs += 0.5;
+    var sum = shadow
+      ? 'dbt-hodor: ' + c.a + ' could be reused, ' + c.b + ' need a build (shadow: all built), ' + c.e + ' fail-open errors'
+      : 'dbt-hodor: ' + c.a + ' reused, ' + c.b + ' built, ' + c.e + ' fail-open errors';
+    push(sum, 'l-sum');
+    push('Done. PASS=' + (okm + 5) + ' WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=' + rum + ' TOTAL=8', 'l-dim');
+    return ev;
+  }
+  // what dbt-hodor explain prints for one model in a scenario (same layout as the CLI)
+  var XUP = { stg: [], fct: ['raw.orders'], inc: ['raw.payments'] };
+  var XTOK = { 'raw.orders': '14@1792465200000', 'raw.payments': '8@1792378800000' };
+  var XNEW = { 'raw.orders': '15@1792551600000', 'raw.payments': '9@1792551600000' };
+  var XHASH = { stg: ['qualify:244b1d30', '6d00343d'], fct: ['qualify:6c1f02aa', 'e56f2a83'], inc: ['qualify:9b3e7c51', '1a7f4d09'] };
+  function genExplain(sc, id) {
+    var it = SI.filter(function (x) { return x.id === id; })[0], dec = sc.m[id];
+    var action = sc.mode === 'shadow' ? 'build' : dec[0], why = dec[1], out = [];
+    function o(text, cls) { out.push({ text: text, cls: cls == null ? 'l-dim' : cls }); }
+    function cmp(label, was, changed, now) {
+      o('  ' + label + (changed ? was + ' -> ' + now : 'same (' + was + ')'), changed ? 'l-warn' : 'l-dim');
+    }
+    out.push({ text: '$ dbt-hodor explain -s ' + it.name, cls: 'l-dim', cmd: true, hold: 700 });
+    o('dbt-hodor explain: hodor_e2e/local, invocation 7d1e4b90-... (2026-10-21 20:42 UTC), 1 node');
+    o('model.hodor_e2e.' + it.name + ': ' + action + ' (' + why + ')', action === 'reuse' ? 'l-reuse' : '');
+    if (action !== dec[0]) o('  mode shadow: hodor decided ' + dec[0], 'l-reuse');
+    if (why === 'no_history') { o('  last build   none in the lookback window', 'l-warn'); return out; }
+    o('  last build   2026-10-20 20:41 UTC, invocation 1f0c2a7e-...');
+    if (why === 'hodor_error') { o('  hashes       not computed for this run', 'l-warn'); return out; }
+    cmp('code hash    ', XHASH[id][0], why === 'code_changed', 'qualify:d41f8a63');
+    cmp('config hash  ', XHASH[id][1], why === 'config_changed', '83c2e5f1');
+    XUP[id].forEach(function (t) {
+      // a recreated table restarts its versions; the commit time still differs
+      var now = sc.tags.src1 === 'recreated' ? '1@1792551600000' : XNEW[t];
+      cmp('upstream     ' + t + ': ', XTOK[t], why === 'new_upstream_data', now);
+    });
+    if (sc.tags[id] === 'current_date() filter') cmp('upstream     volatile:date: ', '2026-10-20', true, '2026-10-21');
+    return out;
+  }
+  var simSel = 1, simEv = [], simIdx = -1, simTimer = null, simBuilt = false;
+  var SNODES = [
+    { id: 'src1', t: 'raw.orders', s: 'source', x: 10, y: 8, w: 140, h: 44, src: true },
+    { id: 'src2', t: 'raw.payments', s: 'source', x: 210, y: 8, w: 140, h: 44, src: true },
+    { id: 'stg', t: 'stg_orders', s: 'view', x: 10, y: 76, w: 140, h: 44 },
+    { id: 'inc', t: 'inc_orders', s: 'incremental', x: 210, y: 76, w: 140, h: 44 },
+    { id: 't1', t: 'not_null', s: '', x: 10, y: 126, w: 66, h: 22, test: true },
+    { id: 't2', t: 'unique', s: '', x: 84, y: 126, w: 66, h: 22, test: true },
+    { id: 't3', t: 'not_null', s: '', x: 210, y: 126, w: 66, h: 22, test: true },
+    { id: 'fct', t: 'fct_orders', s: 'table', x: 10, y: 172, w: 140, h: 44 },
+    { id: 't4', t: 'not_null', s: '', x: 10, y: 222, w: 66, h: 22, test: true },
+    { id: 't5', t: 'unique', s: '', x: 84, y: 222, w: 66, h: 22, test: true }
+  ];
+  function buildSim() {
+    simBuilt = true;
+    var svg = $('#simdag');
+    [[80, 52, 80, 76], [280, 52, 280, 76], [80, 148, 80, 172]].forEach(function (e) {
+      el('path', { 'class': 'edge', d: 'M' + e[0] + ' ' + e[1] + 'L' + e[2] + ' ' + e[3] }, svg);
+    });
+    SNODES.forEach(function (n) {
+      var g = el('g', { 'class': 'sg' + (n.src ? ' s-src' : ''), 'data-n': n.id }, svg);
+      el('rect', { 'class': 'box', x: n.x, y: n.y, width: n.w, height: n.h, rx: n.test ? 5 : 8 }, g);
+      if (n.test) el('text', { x: n.x + n.w / 2, y: n.y + 15, 'text-anchor': 'middle', 'font-size': 10 }, g, n.t);
+      else {
+        el('text', { x: n.x + n.w / 2, y: n.y + 19, 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 700 }, g, n.t);
+        el('text', { 'class': 'sub tg-' + n.id, x: n.x + n.w / 2, y: n.y + 35, 'text-anchor': 'middle' }, g, n.s);
+      }
+    });
+    var pick = $('#simscen');
+    SIMS.forEach(function (sc, i) {
+      var b = hel('button', 'btn', pick, sc.name); b.type = 'button'; b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', function () { simPick(i, true); });
+    });
+  }
+  function simPause() {
+    if (simTimer) { clearTimeout(simTimer); simTimer = null; }
+    var b = $('#splay');
+    if (b) b.innerHTML = (simEv.length && simIdx >= simEv.length - 1) ? '&#8635; Replay' : '&#9654; Play';
+  }
+  function simUi() {
+    var end = simIdx >= simEv.length - 1;
+    $('#sprog').textContent = 'Line ' + (simIdx + 1) + ' of ' + simEv.length + (end ? ', end of the run' : '');
+    $('#sback').disabled = simIdx < 0;
+    $('#srestart').disabled = simIdx < 0;
+    $('#sstep').disabled = end;
+  }
+  function stopSim() { if (simBuilt) simPause(); }
+  function simRender() {
+    var term = $('#term'); term.textContent = '';
+    for (var i = 0; i <= simIdx; i++) {
+      var ev = simEv[i], typing = ev.cmd && i === simIdx;
+      var row = hel('div', ev.cls + (i === simIdx ? ' cur' : ''), term, typing ? null : ev.text);
+      if (typing) hel('span', 'typed', row, ev.text).style.setProperty('--n', ev.text.length);
+    }
+    term.parentElement.classList.toggle('xmode', simIdx >= 0 && !!simEv[simIdx].x);
+    term.scrollTop = term.scrollHeight;
+    simUi();
+    var e = simIdx >= 0 ? simEv[simIdx] : { a: 0, b: 0, e: 0, d: 0, st: {} }, sc = SIMS[simSel], sh = sc.mode === 'shadow';
+    $$('#simdag .sg').forEach(function (g) {
+      var id = g.getAttribute('data-n'), n = SNODES.filter(function (x) { return x.id === id; })[0];
+      g.setAttribute('class', 'sg' + (n.src ? ' s-src' : '') + (e.st[id] ? ' ' + e.st[id] : ''));
+    });
+    SNODES.forEach(function (n) {
+      var t = $('#simdag .tg-' + n.id); if (!t) return;
+      var tag = sc.tags[n.id];
+      t.textContent = tag ? n.s + ': ' + tag : n.s;
+      t.setAttribute('class', 'sub tg-' + n.id + (tag ? ' tagtx' : ''));
+    });
+    renderTiles($('#smeters'), { started: simIdx >= 0, shadow: sh, M: 8, reuse: e.a, built: sh ? e.d : e.b, errs: e.e, q: e.q || 0, qb: SIMBASE.qb, t: e.t || 0, tb: SIMBASE.tb, cs: e.cs || 0, csb: SIMBASE.csb, done: simIdx >= simEv.length - 1 });
+  }
+  function simTick() {
+    simTimer = null;
+    if (simIdx < simEv.length - 1) { simIdx++; simRender(); }
+    if (simIdx >= simEv.length - 1) { simPause(); return; }
+    simTimer = setTimeout(simTick, parseInt($('#sspeed').value, 10) + (simEv[simIdx].hold || 0));
+  }
+  function simPlay() {
+    if (simIdx >= simEv.length - 1) { simIdx = -1; simRender(); }
+    $('#splay').innerHTML = '&#9208; Pause';
+    simTimer = setTimeout(simTick, 150);
+  }
+  function simPick(i, auto) {
+    simPause();
+    simSel = i; simEv = genSim(SIMS[i]); simIdx = -1;
+    $$('#simscen .btn').forEach(function (b, k) { b.setAttribute('aria-pressed', k === i ? 'true' : 'false'); });
+    $$('.xpl .btn').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+    $('#simdesc').textContent = SIMS[i].desc;
+    if (reduce) { simIdx = simEv.length - 1; simRender(); simPause(); return; }
+    simRender();
+    if (auto) simPlay(); else simPause();
+  }
+  // finish the run, then type the explain command and print its output
+  function simExplain(id) {
+    simPause();
+    var run = genSim(SIMS[simSel]), last = run[run.length - 1];
+    simEv = run.concat(genExplain(SIMS[simSel], id).map(function (x) {
+      return { text: x.text, cls: x.cls, cmd: x.cmd, hold: x.hold, x: true, a: last.a, b: last.b, e: last.e, d: last.d, q: last.q, t: last.t, cs: last.cs, st: last.st };
+    }));
+    $$('.xpl .btn').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-x') === id ? 'true' : 'false'); });
+    simIdx = reduce ? simEv.length - 1 : run.length - 1;
+    simRender();
+    if (reduce) simPause(); else simPlay();
+  }
+  $$('.xpl .btn').forEach(function (b) { b.addEventListener('click', function () { simExplain(b.getAttribute('data-x')); }); });
+  $('#splay').addEventListener('click', function () { if (simTimer) simPause(); else simPlay(); });
+  $('#sstep').addEventListener('click', function () { simPause(); if (simIdx < simEv.length - 1) { simIdx++; simRender(); } simPause(); });
+  $('#sback').addEventListener('click', function () { simPause(); if (simIdx >= 0) { simIdx--; simRender(); } simPause(); });
+  $('#srestart').addEventListener('click', function () { simPause(); simIdx = -1; simRender(); simPause(); });
+  function initSim() {
+    if (simBuilt) return;
+    buildSim();
+    if (reduce) $('#snote').textContent = 'Reduced motion is on: a scenario shows its full log at once. Press Restart, Step or Play to replay it line by line.';
+    simPick(1, !reduce);
+  }
+
+  /* ---------- tab 5: ladder ---------- */
+  var RULES = [
+    { n: 2, r: 'full_refresh', c: '--full-refresh, or full_refresh: true on the node', d: 'build' },
+    { n: 3, r: 'unsupported', c: 'resource type, materialization or incremental strategy is out of scope', d: 'build' },
+    { n: 4, r: 'no_history', c: 'no earlier successful build record for this node', d: 'build' },
+    { n: 5, r: 'relation_missing', c: 'the relation is missing from the warehouse', d: 'build' },
+    { n: 6, r: 'code_changed', c: 'code hash differs from the record (with compare_unrendered_code, rendered and unrendered hashes must both differ)', d: 'build' },
+    { n: 7, r: 'config_changed', c: 'config hash differs from the record (config, column types, constraints, masks, and project macros the materialization or hooks run)', d: 'build' },
+    { n: 8, r: 'target_modified', c: 'tables and incrementals: the target data version differs from the one recorded after the last build', d: 'build' },
+    { n: 9, r: 'select_star_view', c: 'a view whose final SELECT * reads directly from a ref() or source()', d: 'build' },
+    { n: 10, r: 'view_unchanged', c: 'the node is a view and its definition is unchanged', d: 'reuse' },
+    { n: 11, r: 'unknown_upstream', c: 'any upstream table has an unknown data version', d: 'build' },
+    { n: 12, r: 'no_new_data', c: 'no upstream changed since the last build (any), or not all of them changed (all)', d: 'reuse' },
+    { n: 13, r: 'within_lag_tolerance', c: 'upstream changed, but the last build is younger than lag_tolerance (default 45m; tests 0)', d: 'reuse' },
+    { n: 14, r: 'new_upstream_data', c: 'otherwise (volatile_sql when only volatile values such as the date changed)', d: 'build' },
+    { n: 15, r: 'hodor_error', c: 'an exception anywhere in hodor for this node (fail open)', d: 'build' }
+  ];
+  var SCEN = [
+    ['Nothing changed', 'no_new_data', 'Same code, same config, the table was not touched, and no upstream has new data.'],
+    ['New upstream data', 'new_upstream_data', 'An upstream table got a data-change commit after the last build, and the last build is older than lag_tolerance.'],
+    ['New data, inside lag tolerance', 'within_lag_tolerance', 'Upstream changed 10 minutes after the last build. lag_tolerance is 45m, so the node is reused.'],
+    ['New day, date window', 'new_upstream_data', 'The model filters on current_date() - 7. No upstream has new rows, but the date changed since the last build, so the window moved.', 'volatile_sql'],
+    ['Stamp column only', 'no_new_data', 'The only volatile function is a stamp: current_timestamp() as _loaded_at in the final SELECT. It decides no rows or values, so the node is reused and keeps the stamp of its last build.'],
+    ['Upstream recreated', 'new_upstream_data', 'The upstream table was dropped and recreated, so its Delta version restarted at a number seen before. The token also holds the commit time, so it still counts as new data.'],
+    ['Code changed', 'code_changed', 'The normalized compiled SQL differs from the last build.'],
+    ['Config changed', 'config_changed', 'A config that changes the data (for example the materialization or a column type) differs.'],
+    ['Constraint or mask changed', 'config_changed', 'A model-level primary key, a column mask, a row filter or a column type changed in YAML. The SQL is the same, but the config hash differs.'],
+    ['Macro override changed', 'config_changed', 'A project or package macro that the materialization or a hook runs changed, for example an override of create_table_as that adds an audit column.'],
+    ['OPTIMIZE ran', 'no_new_data', 'OPTIMIZE is a maintenance commit. It does not change the data version of an upstream table or of the node itself, so nothing triggers a build.'],
+    ['Someone wrote to the table', 'target_modified', 'The node\'s own table has a data-change commit that this node did not make. Its data may differ from what hodor recorded.'],
+    ['A view', 'view_unchanged', 'A view stores no data and always shows current upstream data. Only a definition change rebuilds it.'],
+    ['A view with SELECT *', 'select_star_view', 'The columns of the upstream table can change without any change in the view code, so the view is rebuilt.'],
+    ['read_files input', 'unknown_upstream', 'read_files(...) and other table functions have no data version. hodor cannot tell if the input changed, so the node builds.'],
+    ['--full-refresh', 'full_refresh', 'A full refresh always builds.'],
+    ['First run', 'no_history', 'There is no earlier successful build record in the lookback window.'],
+    ['Table was dropped', 'relation_missing', 'The relation is not in the warehouse, so there is nothing to reuse.'],
+    ['Seed unchanged', 'no_new_data', 'The CSV content (sha256, line endings normalized) and the config are the same, and the seed table was not written outside dbt. The seed is reused.'],
+    ['Seed CSV edited', 'code_changed', 'The CSV content differs from the last build, so the seed loads again.'],
+    ['Snapshot, nothing changed', 'no_new_data', 'Code, config and upstream data are unchanged and the target was not written outside dbt. A snapshot follows the table rules, and lag_tolerance applies to it too.'],
+    ['Microbatch, Python, materialized view', 'unsupported', 'Out of scope: these are built as plain dbt, like clones, deferral, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.'],
+    ['Error in hodor', 'hodor_error', 'Any exception while deciding is logged as a warning. The node builds as plain dbt would.']
+  ];
+  var ladder = $('#ladder'), scenBox = $('#scen'), result = $('#result'), lt = [], scenIdx = -1, ltimers = [];
+  (function () {
+    var s = hel('li', '', ladder);
+    s.id = 'rshadow';
+    hel('span', 'num', s, '1');
+    var b = hel('div', '', s); b.innerHTML = '<code>shadow</code> <span class="chip build">build</span>';
+    hel('span', 'st', s);
+    hel('div', 'cond', s, 'mode is shadow: build anyway, keep the decision from rules 2 to 14 in the record');
+    RULES.forEach(function (r) {
+      var li = hel('li', '', ladder);
+      hel('span', 'num', li, String(r.n));
+      var b2 = hel('div', '', li); b2.innerHTML = '<code>' + r.r + '</code> <span class="chip ' + r.d + '">' + r.d + '</span>';
+      hel('span', 'st', li);
+      hel('div', 'cond', li, r.c);
+      lt.push(li);
+    });
+    SCEN.forEach(function (s2, i) {
+      var b3 = hel('button', 'btn', scenBox, s2[0]);
+      b3.type = 'button'; b3.setAttribute('aria-pressed', 'false');
+      b3.addEventListener('click', function () { pickScen(i); });
+    });
+  })();
+  function pickScen(i) {
+    scenIdx = i;
+    ltimers.forEach(clearTimeout); ltimers = [];
+    $$('button', scenBox).forEach(function (b, k) { b.setAttribute('aria-pressed', k === i ? 'true' : 'false'); });
+    var hit = -1;
+    RULES.forEach(function (r, k) { if (r.r === SCEN[i][1]) hit = k; });
+    lt.forEach(function (li) { li.className = ''; });
+    result.textContent = 'Walking the rules...';
+    function apply(k) {
+      if (k < hit) lt[k].className = 'pass';
+      else if (k === hit) {
+        lt[k].className = 'hit ' + RULES[k].d;
+        if (hit === RULES.length - 1) for (var j = 0; j < hit; j++) lt[j].className = 'skip';
+        else for (var j2 = hit + 1; j2 < lt.length; j2++) lt[j2].className = 'skip';
+        showResult();
+      }
+    }
+    if (hit === RULES.length - 1) { lt.forEach(function (_, k) { apply(k); }); return; }
+    for (var k = 0; k <= hit; k++) {
+      (function (kk) {
+        if (reduce) apply(kk); else ltimers.push(setTimeout(function () { apply(kk); }, kk * 140));
+      })(k);
+    }
+  }
+  function showResult() {
+    if (scenIdx < 0) return;
+    var s = SCEN[scenIdx], r = RULES.filter(function (x) { return x.r === s[1]; })[0], code = s[3] || r.r;
+    var sh = $('#shadow').checked;
+    $('#rshadow').className = sh ? 'hit build' : '';
+    result.textContent = '';
+    var l1 = hel('div', '', result);
+    l1.innerHTML = 'Decision <span class="chip ' + r.d + '">' + r.d.toUpperCase() + '</span> reason <code>' + code + '</code>';
+    hel('p', '', result, s[2]);
+    var view = r.r === 'view_unchanged' || r.r === 'select_star_view', nm = view ? 'sql view model main.stg_orders' : 'sql table model main.fct_orders', could = r.d === 'reuse';
+    var ll = [['l-dim', '$ dbt build'], ['l-dim', 'dbt-hodor 0.1.0: mode ' + (sh ? 'shadow' : 'on') + ', 8 build records for hodor_e2e/local']];
+    if (r.r === 'hodor_error') ll.push(['l-warn', 'dbt-hodor: deciding model.hodor_e2e.fct_orders failed, building it: KeyError: \'upstreams\' (simulated)']);
+    if (sh) ll.push(['l-ok', ln('1 of 1 OK created ' + nm, 'OK (' + (could ? 'shadow, could reuse: ' : '') + code + ') in 0.06s')]);
+    else if (could) ll.push(['l-reuse', ln('1 of 1 REUSED ' + nm, 'REUSED (' + code + ') in 0.01s')]);
+    else ll.push(['l-ok', ln('1 of 1 OK created ' + nm, 'OK (' + code + ') in 0.07s')]);
+    ll.push(['l-sum', sh ? 'dbt-hodor: ' + (could ? 1 : 0) + ' could be reused, ' + (could ? 0 : 1) + ' need a build (shadow: all built), ' + (r.r === 'hodor_error' ? 1 : 0) + ' fail-open errors'
+      : 'dbt-hodor: ' + (could ? 1 : 0) + ' reused, ' + (could ? 0 : 1) + ' built, ' + (r.r === 'hodor_error' ? 1 : 0) + ' fail-open errors']);
+    setLog('#log5', ll);
+    var hi = $('#ladder li.hit'); if (hi) scrollInto($('#ladderbox'), hi, 40);
+    if (sh) {
+      var p = hel('p', '', result);
+      p.innerHTML = '<b>Shadow mode:</b> dbt builds this node anyway. The record keeps decision <code>' + r.d + '</code> and reason <code>' + code + '</code>.';
+    }
+  }
+  $('#shadow').addEventListener('change', showResult);
+  pickScen(0);
+
+  /* ---------- tab 5: Delta log ---------- */
+  var MAINT = ['OPTIMIZE','VACUUM START','VACUUM END','ANALYZE','COMPUTE STATS','SET TBLPROPERTIES','UNSET TBLPROPERTIES','CHANGE COLUMN','ADD CONSTRAINT','DROP CONSTRAINT','UPGRADE PROTOCOL','SET TAGS','UNSET TAGS','CLUSTER BY','REORG','FSCK'];
+  var ROWM = ['numOutputRows','numTargetRowsInserted','numTargetRowsUpdated','numTargetRowsDeleted','numDeletedRows','numUpdatedRows','numCopiedRows'];
+  function kind(c) {
+    if (MAINT.indexOf(c.op) >= 0) return 'maint';
+    var keys = ROWM.filter(function (m) { return c.m[m] != null; });
+    if (keys.length && keys.every(function (m) { return Number(c.m[m]) === 0; })) return 'zero';
+    return 'data';
+  }
+  var INIT = [
+    { v: 0, op: 'CREATE OR REPLACE TABLE AS SELECT', m: { numOutputRows: 1000 } },
+    { v: 1, op: 'WRITE', m: { numOutputRows: 120 } },
+    { v: 2, op: 'OPTIMIZE', m: {} },
+    { v: 3, op: 'SET TBLPROPERTIES', m: {} },
+    { v: 4, op: 'MERGE', m: { numTargetRowsInserted: 0, numTargetRowsUpdated: 0, numTargetRowsDeleted: 0 } },
+    { v: 5, op: 'CHANGE COLUMN', m: {} },
+    { v: 6, op: 'MERGE', m: { numTargetRowsInserted: 35, numTargetRowsUpdated: 0, numTargetRowsDeleted: 0 } },
+    { v: 7, op: 'VACUUM START', m: {} },
+    { v: 8, op: 'VACUUM END', m: {} },
+    { v: 9, op: 'OPTIMIZE', m: {} }
+  ];
+  var commits, recorded, stimer = null;
+  function resetLog() { commits = INIT.map(function (c) { return { v: c.v, op: c.op, m: c.m }; }); recorded = 1; renderLog(); }
+  function windowed() { return commits.slice(-20); }
+  function token() {
+    var w = windowed();
+    for (var i = w.length - 1; i >= 0; i--) if (kind(w[i]) === 'data') return w[i].v;
+    return null;
+  }
+  var WHY = { maint: 'maintenance, never counts', zero: 'all row metrics are 0, does not count', data: 'changed data: counts' };
+  function renderLog(scanIdx, found, fresh) {
+    var ul = $('#log'); ul.textContent = '';
+    var w = windowed().slice().reverse();
+    w.forEach(function (c, i) {
+      var k = kind(c), li = hel('li', k + (scanIdx === i ? ' scan' : '') + (found === i ? ' found' : '') + (fresh && i === 0 ? ' fresh' : ''), ul);
+      hel('span', '', li, 'v' + c.v);
+      var d = hel('span', '', li); d.innerHTML = '<code></code>'; d.firstChild.textContent = c.op;
+      hel('span', 'chip ' + (k === 'data' ? 'reuse' : 'build'), li, k === 'data' ? 'counts' : 'skipped');
+      hel('span', 'why', li, WHY[k]);
+    });
+    var t = token(), box = $('#tok'); box.textContent = '';
+    var b = hel('div', '', box);
+    b.innerHTML = 'Current token: <b></b> &nbsp; Recorded at last build: <b></b>';
+    b.children[0].textContent = t == null ? 'unknown' : 'v' + t;
+    b.children[1].textContent = 'v' + recorded;
+    var v = hel('div', '', box);
+    if (t == null) v.innerHTML = '<span class="chip build">unknown</span> No data-change commit in the window. Dependents build (<code>unknown_upstream</code>).';
+    else if (t === recorded) v.innerHTML = '<span class="chip reuse">equal</span> No new data. A node on this upstream can be reused (<code>no_new_data</code>).';
+    else v.innerHTML = '<span class="chip build">different</span> New upstream data. The node builds (<code>new_upstream_data</code>), unless the last build is inside <code>lag_tolerance</code>.';
+    var ll = [['l-dim', 'dbt-hodor: DESCRIBE HISTORY main.raw.orders LIMIT 20'],
+      ['l-dim', 'dbt-hodor: ' + windowed().length + ' commits read, ' + windowed().filter(function (c) { return kind(c) === 'data'; }).length + ' change data']];
+    if (t == null) ll.push(['l-warn', 'dbt-hodor: main.raw.orders data version unknown, dependents build (unknown_upstream)']);
+    else if (t === recorded) ll.push(['l-reuse', 'dbt-hodor: main.raw.orders data version v' + t + ' equals recorded v' + recorded + ' (no_new_data)']);
+    else ll.push(['l-ok', 'dbt-hodor: main.raw.orders data version v' + t + ', recorded v' + recorded + ' (new_upstream_data)']);
+    setLog('#log6', ll);
+  }
+  function addCommit(kindName) {
+    var last = commits[commits.length - 1].v + 1, c;
+    if (kindName === 'OPTIMIZE') c = { v: last, op: 'OPTIMIZE', m: {} };
+    else if (kindName === 'INSERT') c = { v: last, op: 'WRITE', m: { numOutputRows: 50 } };
+    else if (kindName === 'MERGE0') c = { v: last, op: 'MERGE', m: { numTargetRowsInserted: 0, numTargetRowsUpdated: 0, numTargetRowsDeleted: 0 } };
+    else c = { v: last, op: 'SET TBLPROPERTIES', m: {} };
+    commits.push(c);
+    renderLog(-1, -1, true);
+  }
+  $$('[data-add]').forEach(function (b) { b.addEventListener('click', function () { clearInterval(stimer); addCommit(b.getAttribute('data-add')); }); });
+  $('#built').addEventListener('click', function () { var t = token(); if (t != null) recorded = t; renderLog(); });
+  $('#reset').addEventListener('click', function () { clearInterval(stimer); resetLog(); });
+  $('#scan').addEventListener('click', function () {
+    clearInterval(stimer);
+    var w = windowed().slice().reverse(), i = 0;
+    function step() {
+      if (i >= w.length) { clearInterval(stimer); renderLog(); return; }
+      if (kind(w[i]) === 'data') { clearInterval(stimer); renderLog(-1, i); return; }
+      renderLog(i); i++;
+    }
+    if (reduce) { for (i = 0; i < w.length && kind(w[i]) !== 'data'; i++) { /* find first */ } renderLog(-1, i < w.length ? i : -1); return; }
+    step(); stimer = setInterval(step, 600);
+  });
+  resetLog();
+
+  /* DuckDB fingerprint demo */
+  var FP0 = [[1, 'alice', 10], [2, 'bob', 20], [3, 'carol', 30]], fp;
+  function h32(s) { var h = 2166136261; for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
+  function renderFp() {
+    var sum = 0;
+    fp.forEach(function (r) { sum = (sum + h32(r.join('|'))) >>> 0; });
+    var box = $('#fp'); box.textContent = '';
+    hel('div', '', box, 'rows: ' + fp.map(function (r) { return '(' + r.join(', ') + ')'; }).join(' '));
+    hel('div', '', box, 'token = ' + fp.length + ' rows + ' + ('00000000' + sum.toString(16)).slice(-8));
+  }
+  $$('[data-fp]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var a = b.getAttribute('data-fp');
+      if (a === 'shuffle') fp.push(fp.shift());
+      else if (a === 'edit') fp[0] = [fp[0][0], fp[0][1], fp[0][2] + 1];
+      else if (a === 'add') fp.push([fp.length + 1, 'dave', 40]);
+      else fp = FP0.map(function (r) { return r.slice(); });
+      renderFp();
+    });
+  });
+  fp = FP0.map(function (r) { return r.slice(); }); renderFp();
+
+  /* ---------- tab 6: lineage ---------- */
+  var DAG = [
+    { id: 'src', t: 'orders', s: 'source, Delta v41', k: 'table', x: 0, y: 8, w: 164, up: [] },
+    { id: 'path', t: 'delta path', s: '/raw/fx, v7', k: 'table', x: 0, y: 76, w: 164, up: [] },
+    { id: 'csv', t: 'read_files(...)', s: 'no version', k: 'opaque', x: 0, y: 144, w: 164, up: [] },
+    { id: 'stg', t: 'stg_orders', s: 'view', k: 'view', x: 185, y: 8, w: 164, up: ['src'] },
+    { id: 'fx', t: 'fx_clean', s: 'ephemeral', k: 'view', x: 185, y: 76, w: 164, up: ['path'] },
+    { id: 'bronze', t: 'csv_bronze', s: 'table, v5', k: 'table', x: 185, y: 144, w: 164, up: ['csv'] },
+    { id: 'ord', t: 'orders_tbl', s: 'table, v18', k: 'table', x: 370, y: 8, w: 164, up: ['stg'] },
+    { id: 'mart', t: 'mart_sales', s: 'table, v9', k: 'table', x: 556, y: 60, w: 164, up: ['ord', 'fx'] }
+  ];
+  var dagBuilt = false, dagSel = 'mart', byId = {};
+  DAG.forEach(function (n) { byId[n.id] = n; });
+  function anc(id, set) { byId[id].up.forEach(function (u) { set[u] = true; anc(u, set); }); return set; }
+  function resolve(id, out) {
+    byId[id].up.forEach(function (u) {
+      var n = byId[u];
+      if (n.k === 'view') resolve(u, out); else out[u] = true;
+    });
+    return out;
+  }
+  function renderDag() {
+    var svg = $('#dag');
+    if (!dagBuilt) {
+      dagBuilt = true;
+      DAG.forEach(function (n) {
+        n.up.forEach(function (u) {
+          var a = byId[u];
+          el('path', { 'class': 'edge', 'data-e': u + '>' + n.id, d: 'M' + (a.x + a.w) + ' ' + (a.y + 23) + 'L' + n.x + ' ' + (n.y + 23) }, svg);
+        });
+      });
+      DAG.forEach(function (n) {
+        var g = el('g', { 'data-n': n.id, 'data-i': n.id }, svg);
+        el('rect', { 'class': 'box', x: n.x, y: n.y, width: n.w, height: 46, rx: 8 }, g);
+        el('text', { x: n.x + n.w / 2, y: n.y + 20, 'text-anchor': 'middle', 'font-size': 12, 'font-weight': 700 }, g, n.t);
+        el('text', { x: n.x + n.w / 2, y: n.y + 36, 'text-anchor': 'middle', 'class': 'sub' }, g, n.s);
+        g.addEventListener('click', function () { if (n.k !== 'opaque' && n.id !== 'src' && n.id !== 'path') { dagSel = n.id; renderDag(); } });
+      });
+      var pick = $('#dagpick');
+      DAG.filter(function (n) { return n.up.length; }).forEach(function (n) {
+        var b = hel('button', 'btn', pick, n.t); b.type = 'button'; b.setAttribute('data-p', n.id);
+        b.addEventListener('click', function () { dagSel = n.id; renderDag(); });
+      });
+    }
+    var set = anc(dagSel, {}), res = resolve(dagSel, {}), unknown = false;
+    $$('#dag g[data-n]').forEach(function (g) {
+      var id = g.getAttribute('data-n'), n = byId[id], c = '';
+      if (id === dagSel) c = 'tg';
+      else if (res[id] && n.k === 'opaque') { c = 'unk'; unknown = true; }
+      else if (res[id]) c = 'dep';
+      else if (set[id]) c = 'via';
+      g.setAttribute('class', c);
+    });
+    $$('#dag .edge').forEach(function (p) {
+      var pr = p.getAttribute('data-e').split('>');
+      var hot = (set[pr[0]] || pr[0] === dagSel) && (set[pr[1]] || pr[1] === dagSel);
+      p.setAttribute('class', 'edge' + (hot ? ' hot' : ''));
+    });
+    $$('#dagpick .btn').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-p') === dagSel ? 'true' : 'false'); });
+    var box = $('#dagres'); box.textContent = '';
+    var t = byId[dagSel], names = Object.keys(res).map(function (i) { return byId[i].t; });
+    var d = hel('div', '', box);
+    d.innerHTML = '<b></b> reads these tables: <code></code>';
+    d.children[0].textContent = t.t;
+    d.children[1].textContent = names.join(', ') || 'none';
+    var v = hel('p', '', box);
+    // a view is judged by its definition (rule 10) before unknown upstreams (rule 11)
+    if (t.k === 'view') v.innerHTML = '<span class="chip reuse">view</span> A view stores no data, so it is reused when its definition is unchanged (<code>view_unchanged</code>).';
+    else if (unknown) v.innerHTML = '<span class="chip build">build</span> An input has no version, so hodor cannot tell if it changed (<code>unknown_upstream</code>).';
+    else v.innerHTML = '<span class="chip reuse">can reuse</span> Every input has a version. The node builds only if one of them changed since its last build.';
+    var ll = [['l-dim', 'dbt-hodor: ' + t.t + ' reads ' + (names.join(', ') || 'none')]];
+    if (t.k === 'view') ll.push(['l-reuse', 'dbt-hodor: ' + t.t + ' is a view, reused while its definition is unchanged (view_unchanged)']);
+    else if (unknown) ll.push(['l-warn', 'dbt-hodor: an input of ' + t.t + ' has no version, BUILD (unknown_upstream)']);
+    else ll.push(['l-reuse', 'dbt-hodor: every input of ' + t.t + ' has a version, it builds only if one changed']);
+    setLog('#log7', ll);
+  }
+  var origShow = show;
+  show = function (i) { origShow(i); if (i === 6) renderDag(); if (i === 7) renderNodes(); };
+
+  /* ---------- tab 7 ---------- */
+  var NODES = [
+    ['stg_users', 'no_new_data'], ['stg_orders', 'no_new_data'], ['dim_date', 'view_unchanged'], ['fct_sales', 'new_upstream_data'],
+    ['dim_user', 'within_lag_tolerance'], ['mart_kpi', 'no_new_data'], ['csv_load', 'unknown_upstream'], ['rpt_daily', 'code_changed']
+  ];
+  var RD = { no_new_data: 1, view_unchanged: 1, within_lag_tolerance: 1 };
+  function renderNodes() {
+    var mode = $('input[name=mode]:checked').value, inj = $('#inject').checked, box = $('#nodes');
+    box.textContent = '';
+    var reused = 0, built = 0, errs = 0, could = 0;
+    NODES.forEach(function (n, i) {
+      var reason = n[1], wouldReuse = !!RD[reason], err = false;
+      if (inj && i === 5 && mode !== 'off') { reason = 'hodor_error'; wouldReuse = false; err = true; errs++; }
+      var cls = 'nd', note;
+      if (mode === 'on' && wouldReuse) { cls += ' reuse'; note = 'reuse: ' + reason; reused++; }
+      else {
+        built++;
+        if (err) { cls += ' err'; note = 'build: hodor_error'; }
+        else if (mode === 'shadow' && wouldReuse) { cls += ' ghost'; note = 'could reuse: ' + reason; could++; }
+        else if (mode === 'off') note = 'plain dbt';
+        else note = 'build: ' + reason;
+      }
+      var d = hel('div', cls, box); hel('b', '', d, n[0]); hel('span', '', d, note);
+    });
+    var NT = [3.0, 5.5, 0.8, 6.2, 4.1, 3.7, 2.9, 5.0], mq = 0, mt = 0, mcs = 0, mqb = 0, mtb = 0, mcsb = 0, nbuilt = 0, nre = 0, nup = 3;
+    NODES.forEach(function (n, i) {
+      var wr = !!RD[n[1]] && !(inj && i === 5), reuseIt = mode === 'on' && wr;
+      mqb += 2; mtb += NT[i]; mcsb += 4 * NT[i];
+      if (reuseIt) { nre++; mt += 0.01; } else { nbuilt++; mq += 2; mt += NT[i]; mcs += 4 * NT[i]; if (mode !== 'off') { mq += 1; mt += 0.2; mcs += 0.5; } }
+      if (mode === 'shadow' && wr) nre++;
+    });
+    if (mode !== 'off') { mq += 1 + nup + 1; mt += 1.1 + 0.4; mcs += 0.5 * (1 + nup + 1); }
+    renderTiles($('#mmeters'), { compact: true, started: true, shadow: mode === 'shadow', M: NODES.length, reuse: nre, built: nbuilt, errs: errs, q: mq, qb: mqb, t: mt, tb: mtb, cs: mcs, csb: mcsb, done: true });
+    var ll = [];
+    if (mode === 'off') ll.push(['l-dim', 'dbt-hodor: mode off, nothing patched, no records written']);
+    else ll.push(['l-dim', 'dbt-hodor 0.1.0: mode ' + mode + ', 8 build records for hodor_e2e/local']);
+    NODES.forEach(function (n, i) {
+      var reason = n[1], wr = !!RD[reason], er = inj && i === 5 && mode !== 'off', pre = (i + 1) + ' of 8 ';
+      if (er) { reason = 'hodor_error'; wr = false; ll.push(['l-warn', 'dbt-hodor: deciding model.hodor_e2e.' + n[0] + ' failed, building it: KeyError: \'upstreams\' (simulated)']); }
+      if (mode === 'on' && wr) ll.push(['l-reuse', ln(pre + 'REUSED sql table model main.' + n[0], 'REUSED (' + reason + ') in 0.01s')]);
+      else if (mode === 'off') ll.push(['l-ok', ln(pre + 'OK created sql table model main.' + n[0], 'OK in 0.07s')]);
+      else ll.push(['l-ok', ln(pre + 'OK created sql table model main.' + n[0], 'OK (' + (mode === 'shadow' && wr ? 'shadow, could reuse: ' : '') + reason + ') in 0.0' + (mode === 'shadow' ? '6' : '7') + 's')]);
+    });
+    $('#sumline').textContent = mode === 'off' ? 'hodor patches nothing and writes no records. No summary line.'
+      : mode === 'shadow' ? 'dbt-hodor: ' + could + ' could be reused, ' + (NODES.length - could) + ' need a build (shadow: all built), ' + errs + ' fail-open errors'
+      : 'dbt-hodor: ' + reused + ' reused, ' + built + ' built, ' + errs + ' fail-open errors';
+    if (mode !== 'off') ll.push(['l-sum', $('#sumline').textContent]);
+    setLog('#log8', ll);
+  }
+  $$('input[name=mode]').forEach(function (r) { r.addEventListener('change', renderNodes); });
+  $('#inject').addEventListener('change', renderNodes);
+
+  /* ---------- tab 8: reason table ---------- */
+  (function () {
+    var t = $('#reasons');
+    var s = [[1, 'shadow', 'build anyway, decision recorded']].concat(RULES.map(function (r) { return [r.n, r.r, r.d]; }));
+    s.forEach(function (r) {
+      var tr = hel('tr', '', t);
+      hel('td', '', tr, String(r[0]));
+      var td = hel('td', '', tr); hel('code', '', td, r[1]);
+      hel('td', '', tr, r[2]);
+    });
+  })();
+
+  $$('.toc [data-to]').forEach(function (b) {
+    b.addEventListener('click', function () { var t = document.getElementById(b.getAttribute('data-to')); if (t) scrollInto($('#docbody'), t, 0); });
+  });
+
+  fromHash();
+})();
+</script>
+</body>
+</html>

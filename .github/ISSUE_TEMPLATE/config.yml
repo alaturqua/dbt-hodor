@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A wrong reuse, or any security issue
+    url: https://github.com/alaturqua/dbt-hodor/security/advisories/new
+    about: >
+      If hodor reused a node whose code or upstream data had changed, report it privately.
+      A wrong reuse leaves stale data behind that a successful run says is fresh.
+  - name: Documentation
+    url: https://github.com/alaturqua/dbt-hodor/blob/main/docs/index.md
+    about: Settings, reason codes, stores and the design spec, before filing an issue.

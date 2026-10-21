@@ -1,0 +1,32 @@
+# Run the GitHub Actions workflows locally with act (https://nektosact.com).
+# Needs Docker. Flags here apply to every act run, so there is nothing to remember.
+#
+#   act -l                       list the jobs
+#   act -j lint                  ruff
+#   act -j test                  unit and end-to-end tests
+#   act -j postgres              the Postgres store against a service container
+#   act pull_request             everything a pull request would run
+#
+# The windows-latest leg of the test matrix cannot run here: act only runs Linux
+# containers. Use `act -j test --matrix os:ubuntu-24.04` to skip it.
+
+# The default act images are minimal and miss tooling the workflows assume.
+-P ubuntu-latest=catthehacker/ubuntu:act-latest
+-P ubuntu-24.04=catthehacker/ubuntu:act-24.04
+-P ubuntu-22.04=catthehacker/ubuntu:act-22.04
+
+# Keep the container between runs, so uv and apt work is not repeated every time.
+--reuse
+
+# actions/upload-artifact needs somewhere local to put them.
+--artifact-server-path /tmp/act-artifacts
+
+# Do not check the registry for a newer image on every run.
+--pull=false
+
+# Use the actions already cached under ~/.cache/act instead of fetching them from GitHub
+# every run. Delete that directory, or drop this flag once, to pick up a newer action.
+--action-offline-mode
+
+# Quieter output; drop this line when a job fails and you need the detail.
+--quiet

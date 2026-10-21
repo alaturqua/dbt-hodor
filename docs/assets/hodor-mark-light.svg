@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 5 85 89" width="85" height="89" role="img" aria-labelledby="t">
+  <title id="t">dbt-hodor</title>
+  <defs><linearGradient id="hodor-door" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b91c1c"/><stop offset="1" stop-color="#991b1b"/></linearGradient></defs>
+  <path d="M20 92V64a28 28 0 0 1 56 0v28z" fill="url(#hodor-door)"/><path d="M34 40V92M48 36V92M62 40V92" stroke="#450a0a" stroke-width="1.6"/><circle cx="28" cy="52" r="1.8" fill="#111111"/><circle cx="28" cy="84" r="1.8" fill="#111111"/><circle cx="68" cy="52" r="1.8" fill="#111111"/><circle cx="68" cy="84" r="1.8" fill="#111111"/><rect x="12" y="62" width="72" height="9" rx="2" fill="#111111"/><g transform="translate(0 -15)"><path d="M10 54L30 42C36 30 50 24 60 27C63 21 72 21 76 26L91 30L78 34C77 40 73 44 68 47C64 51 56 50 50 49Z" fill="#111111"/><path d="M56 48V54M62 47V54" stroke="#111111" stroke-width="2.4" stroke-linecap="round"/><circle cx="70.5" cy="27.5" r="1.9" fill="#f5f5f4"/></g>
+</svg>

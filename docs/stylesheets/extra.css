@@ -1,0 +1,180 @@
+/* hodor brand, "Muted night": raven on the red door. Desaturated navy and charcoal, soft crimson.
+   Dark is the calm default look; light is bone paper with navy ink and a navy header. Crimson is for
+   links, the primary button and the active tab only. Tokens match docs/guide/index.html. */
+
+/* Cinzel (SIL OFL 1.1, see assets/fonts/cinzel/OFL.txt) is served from this site: no request to Google Fonts. */
+@font-face {
+  font-family: "Cinzel";
+  src: url("../assets/fonts/cinzel/Cinzel.ttf") format("truetype");
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --md-text-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --md-code-font: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, Menlo, "Liberation Mono", monospace;
+  --hodor-display: "Cinzel", "Iowan Old Style", Georgia, "Times New Roman", serif;
+}
+
+/* Light: bone paper, navy ink, crimson links; navy header. */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #1f2633;
+  --md-primary-fg-color--light: #1f2633;
+  --md-primary-fg-color--dark: #1f2633;
+  --md-primary-bg-color: #f4f2ed;
+  --md-accent-fg-color: #861619;
+  --md-accent-fg-color--transparent: #8616191a;
+  --md-default-bg-color: #f4f2ed;
+  --md-default-fg-color: #1f2430;
+  --md-default-fg-color--light: #4d5361;
+  --md-default-fg-color--lighter: #696e7c;
+  --md-default-fg-color--lightest: #dcd8cf;
+  --md-typeset-color: #1f2430;
+  --md-typeset-a-color: #a61e22;
+  --md-code-bg-color: #ebe8e1;
+  --md-code-fg-color: #1f2430;
+  --md-footer-bg-color: #1f2633;
+  --md-footer-bg-color--dark: #1f2633;
+  --md-footer-fg-color: #f4f2ed;
+  --md-footer-fg-color--light: #c9ced8;
+  --md-footer-fg-color--lighter: #9aa3b2;
+  --hodor-ink: #1f2633;
+  --hodor-rule: #e03131;
+  --hodor-mark: #e03131;
+  --hodor-head-fg: #f4f2ed;
+  --hodor-head-ph: #c3c3c1;
+  --hodor-search: #171c26;
+  --hodor-btn: #a61e22;
+  --hodor-btn-border: #a61e22;
+  --hodor-btn-fg: #ffffff;
+}
+
+/* Dark: deep navy page, charcoal header, cool light text, soft crimson links. */
+[data-md-color-scheme="slate"] {
+  --md-hue: 218;
+  --md-primary-fg-color: #0b0e13;
+  --md-primary-fg-color--light: #0b0e13;
+  --md-primary-fg-color--dark: #0b0e13;
+  --md-primary-bg-color: #e7eaf0;
+  --md-accent-fg-color: #f5a5a5;
+  --md-accent-fg-color--transparent: #f5a5a51a;
+  --md-default-bg-color: #12161d;
+  --md-default-fg-color: #d9dee6;
+  --md-default-fg-color--light: #9ca6b4;
+  --md-default-fg-color--lighter: #808a99;
+  --md-default-fg-color--lightest: #2e3643;
+  --md-typeset-color: #d9dee6;
+  --md-typeset-a-color: #ec7c7c;
+  --md-code-bg-color: #1e242e;
+  --md-code-fg-color: #d9dee6;
+  --md-footer-bg-color: #0b0e13;
+  --md-footer-bg-color--dark: #0b0e13;
+  --md-footer-fg-color: #e7eaf0;
+  --md-footer-fg-color--light: #b6bfcc;
+  --md-footer-fg-color--lighter: #8a95a6;
+  --hodor-ink: #0b0e13;
+  --hodor-rule: #cc2222;
+  --hodor-mark: #cc2222;
+  --hodor-head-fg: #e7eaf0;
+  --hodor-head-ph: #b6b9be;
+  --hodor-search: #080a0e;
+  --hodor-btn: #a61e22;
+  --hodor-btn-border: #e03131;
+  --hodor-btn-fg: #ffffff;
+}
+
+/* Header and tabs: navy (light) or near-black navy (dark), thin crimson rule. */
+.md-header,
+.md-tabs {
+  background-color: var(--hodor-ink);
+  color: var(--hodor-head-fg);
+}
+.md-header { box-shadow: none; }
+.md-tabs { border-bottom: 2px solid var(--hodor-rule); }
+.md-tabs__link { opacity: 0.8; }
+.md-tabs__link:hover,
+.md-tabs__link--active,
+.md-tabs__item--active .md-tabs__link { opacity: 1; }
+.md-tabs__item--active { box-shadow: inset 0 -2px 0 var(--hodor-mark); }
+.md-header__button.md-logo img { height: 1.8rem; width: auto; }
+.md-header__topic { font-family: var(--hodor-display); font-weight: 700; letter-spacing: 0.04em; }
+.md-search__input::placeholder,
+.md-search__input + .md-search__icon { color: var(--hodor-head-ph); }
+@media screen and (min-width: 60em) { .md-search__form { background-color: var(--hodor-search); } }
+
+.md-nav__link--active,
+.md-nav__item .md-nav__link--active { color: var(--md-typeset-a-color); font-weight: 600; }
+
+.md-typeset h1 {
+  font-family: var(--hodor-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--md-default-fg-color);
+}
+.md-typeset h2 { font-weight: 650; letter-spacing: -0.01em; }
+.md-typeset code { border-radius: 4px; }
+.md-typeset pre > code { border-radius: 8px; }
+.md-typeset .highlight,
+.md-typeset table:not([class]) { border-radius: 8px; }
+.md-typeset table:not([class]) {
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  box-shadow: none;
+}
+.md-typeset table:not([class]) th {
+  background-color: var(--md-code-bg-color);
+  color: var(--md-default-fg-color);
+}
+.md-typeset .admonition,
+.md-typeset details { border-radius: 8px; box-shadow: none; }
+
+/* Landing page */
+.hodor-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 2.5rem 1rem 2rem;
+  margin-bottom: 1.5rem;
+  border-radius: 16px;
+  background: var(--md-code-bg-color);
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+}
+.hodor-hero img.hodor-logo { width: min(26rem, 90%); height: auto; margin: 0 0 0.8rem; }
+.md-typeset .hodor-hero h1 { margin: 0; font-size: 2.2rem; line-height: 1.15; }
+.hodor-hero .hodor-lead { margin: 0.6rem 0 1.2rem; max-width: 36rem; color: var(--md-default-fg-color--light); }
+.hodor-hero .md-button { margin: 0.2rem 0.3rem; }
+.md-typeset .hodor-hero .md-button--primary {
+  background-color: var(--hodor-btn);
+  border-color: var(--hodor-btn-border);
+  color: var(--hodor-btn-fg);
+}
+.md-typeset .hodor-hero .md-button:not(.md-button--primary) {
+  color: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color--light);
+}
+.md-typeset .hodor-hero .md-button:hover {
+  background-color: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color);
+  color: var(--md-default-bg-color);
+}
+
+.md-typeset .grid.cards > ul > li {
+  border-radius: 12px;
+  border: 0.05rem solid var(--md-default-fg-color--lightest);
+  transition: border-color 0.2s, transform 0.2s;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--md-typeset-a-color);
+  box-shadow: none;
+  transform: translateY(-2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .md-typeset .grid.cards > ul > li { transition: none; }
+  .md-typeset .grid.cards > ul > li:hover { transform: none; }
+}
+.md-typeset .grid.cards .twemoji { color: var(--md-typeset-a-color); }
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .hodor-hero h1 { font-size: 1.7rem; }
+}

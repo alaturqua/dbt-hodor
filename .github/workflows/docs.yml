@@ -1,0 +1,56 @@
+name: Docs site
+
+# Only when something that ends up on the site changes.
+on:
+  push:
+    branches: [main]
+    paths: &docs
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths: *docs
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --group docs
+      - run: uv run mkdocs build --strict
+      # The artifact is only needed for a deployment, so it is not uploaded on a pull request.
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: site
+    # Publishing the site is off until the repository is public. Turn it on by setting the
+    # repository variable PUBLISH_DOCS to true, and set Pages to "GitHub Actions" under
+    # Settings, Pages. GitHub Pages cannot serve a private repository on a free plan, so
+    # enabling this while the repository is private will fail.
+    if: github.event_name != 'pull_request' && vars.PUBLISH_DOCS == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

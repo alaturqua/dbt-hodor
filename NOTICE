@@ -1,0 +1,16 @@
+dbt-hodor
+Copyright 2026 The dbt-hodor Authors
+
+This product includes software derived from dbt-state
+(https://github.com/dbt-labs/dbt-state, commit b0f3030),
+Copyright 2026 Fivetran, Inc., licensed under the Apache License, Version 2.0.
+
+Files derived from dbt-state, each modified for dbt-hodor:
+- src/dbt_hodor/state_config.py (from clients/dbt_state/src/dbt_state/plugin.py):
+  the `state:` config merge, the only upstream-derived logic in dbt-hodor
+- src/dbt_hodor/plugin.py (from clients/dbt_state/src/dbt_state/plugin.py):
+  the plugin entry point
+- src/dbt_hodor/patches.py (from clients/dbt_state/src/dbt_state/runner.py)
+
+dbt is a trademark of dbt Labs, Inc. dbt-hodor is not affiliated with or
+endorsed by dbt Labs, Inc. or Fivetran, Inc.

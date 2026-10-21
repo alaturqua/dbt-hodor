@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Grouped, so a month of action bumps is one pull request and one CI run, not six.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+    open-pull-requests-limit: 2
+    # dbt-core and the adapters move together, and a minor bump can change compiled SQL and
+    # therefore every hash hodor stores. Those are reviewed by hand, not opened monthly.
+    ignore:
+      - dependency-name: dbt-core
+      - dependency-name: dbt-databricks
+      - dependency-name: dbt-duckdb
