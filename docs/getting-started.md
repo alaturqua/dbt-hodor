@@ -2,25 +2,26 @@
 
 !!! warning "Early development"
 
-    The package is not published to any index yet. Local use on DuckDB is tested. Do not use it in a production job.
+    `dbt-hodor` is available on PyPI. Be cautious before enabling reuse in production: run in shadow mode for at least a week of scheduled runs, review its decisions, and investigate any false reuses first. See [the rollout guidance](operations.md#rollout).
 
 ## Install
 
 hodor needs Python 3.10 or newer, `dbt-core` 1.12.x and `sqlglot` 30.22 or newer (below 31). dbt installs it as a plugin: dbt imports every installed `dbt_*` module that has a `plugins` attribute, so no dbt configuration is needed to load hodor.
 
-=== "uv (from source)"
+=== "uv"
 
     ```sh
-    uv build
-    uv pip install dist/dbt_hodor-0.1.0-py3-none-any.whl
+    uv pip install dbt-hodor
+    # with the local DuckDB state store
+    uv pip install "dbt-hodor[duckdb]"
     ```
 
-=== "pip (wheel)"
+=== "pip"
 
     ```sh
-    pip install dbt_hodor-0.1.0-py3-none-any.whl
+    pip install dbt-hodor
     # with the local DuckDB state store
-    pip install "dbt_hodor-0.1.0-py3-none-any.whl[duckdb]"
+    pip install "dbt-hodor[duckdb]"
     ```
 
 === "Databricks job"
@@ -32,12 +33,12 @@ hodor needs Python 3.10 or newer, `dbt-core` 1.12.x and `sqlglot` 30.22 or newer
       - whl: /Volumes/<catalog>/<schema>/<volume>/dbt_hodor-<version>-py3-none-any.whl
     ```
 
-    From a package index, once one exists:
+    Or install directly from PyPI:
 
     ```yaml
     libraries:
       - pypi:
-          package: "dbt-hodor==<version>"
+          package: "dbt-hodor"
     ```
 
 The wheel is pure Python (`py3-none-any`), so the same file installs on Windows and on Linux job clusters.
@@ -114,8 +115,8 @@ dbt build
 The first run has no history, so every node builds and hodor records it (`no_history`). The log shows the hodor reason in the bracket of each model line:
 
 ```text
-dbt-hodor 0.1.0 is enabled for dbt build
-dbt-hodor 0.1.0: mode on, 0 build records for hodor_e2e/local
+dbt-hodor <installed version> is enabled for dbt build
+dbt-hodor <installed version>: mode on, 0 build records for hodor_e2e/local
 4 of 8 OK created sql table model main.fct_orders .............................. [OK (no_history) in 0.05s]
 7 of 8 PASS not_null_fct_orders_id ............................................. [PASS in 0.09s]
 dbt-hodor: 0 reused, 8 built, 0 fail-open errors
@@ -124,7 +125,7 @@ dbt-hodor: 0 reused, 8 built, 0 fail-open errors
 In the second run, with no new data and no code change, you see lines like these:
 
 ```text
-dbt-hodor 0.1.0: mode on, 8 build records for hodor_e2e/local
+dbt-hodor <installed version>: mode on, 8 build records for hodor_e2e/local
 3 of 8 REUSED sql view model main.stg_orders ................................... [REUSED (view_unchanged) in 0.01s]
 4 of 8 REUSED sql table model main.fct_orders .................................. [REUSED (no_new_data) in 0.01s]
 7 of 8 PASS not_null_fct_orders_id ............................................. [PASS (replayed) in 0.02s]
@@ -136,7 +137,7 @@ The `dbt-hodor:` line at the end is the summary. A built model shows its reason,
 In `shadow` mode every node builds, and the bracket shows what hodor would have done:
 
 ```text
-dbt-hodor 0.1.0: mode shadow, 8 build records for hodor_e2e/local
+dbt-hodor <installed version>: mode shadow, 8 build records for hodor_e2e/local
 4 of 8 OK created sql table model main.fct_orders .............................. [OK (shadow, could reuse: no_new_data) in 0.06s]
 dbt-hodor: 3 could be reused, 5 need a build (shadow: all built), 0 fail-open errors
 ```

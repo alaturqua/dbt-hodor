@@ -362,7 +362,7 @@ The results feed sections 7.1, 7.3 and 9.2 before the engine is built.
 - **Console script:** `dbt-hodor = dbt_hodor.cli:main`.
 - **Build:** `uv build` makes the wheel and the sdist. Both install paths are supported and documented:
   - a wheel in a UC volume, uploaded with `databricks fs cp`, and installed by jobs with `libraries: - whl: /Volumes/<catalog>/<schema>/<volume>/dbt_hodor-<version>-py3-none-any.whl`;
-  - a package index, installed with `libraries: - pypi: {package: "dbt-hodor==<version>"}`, plus `repo:` for a private index.
+  - a package index, installed with `libraries: - pypi: {package: "dbt-hodor"}`, plus `repo:` for a private index.
   - The wheel is pure Python (`py3-none-any`), so the same file installs on Windows and on Linux job clusters.
 
 ### 13.1 License and provenance

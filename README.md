@@ -22,7 +22,7 @@ dbt-hodor is a free, self-hosted alternative to dbt Labs' [dbt State](https://do
 
 It needs no dbt platform account and sends nothing to external services. State lives in a Delta table on Databricks, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 
-> **Status: early development.** hodor runs inside dbt and passes end-to-end tests on dbt-duckdb. Tested live on a Databricks Unity Catalog workspace with a SQL warehouse and dbt-databricks 1.12.7 (2026-10-20 and 2026-10-21): reuse of tables, incremental models (including `replace_where`), views, seeds and snapshots, replayed tests, maintenance commits (OPTIMIZE, zero-row writes, SET TBLPROPERTIES) that keep nodes reused, and real new data or a changed seed file that rebuilds them. The live test runs twice, with `use_materialization_v2` off and on, and also covers contracts with a primary key, a row filter, column masks, date-window and stamp models, and a table swapped in by `use_safer_relation_operations`. The same live suite passes on a second, independent Databricks workspace (2026-10-21). The `postgres` store is tested end to end against Databricks Lakebase. It has not run in a large production project yet. Start in shadow mode.
+> **Status: early development.** hodor runs inside dbt and passes end-to-end tests on dbt-duckdb. Tested live on a Databricks Unity Catalog workspace with a SQL warehouse and dbt-databricks 1.12.7 (2026-10-20 and 2026-10-21): reuse of tables, incremental models (including `replace_where`), views, seeds and snapshots, replayed tests, maintenance commits (OPTIMIZE, zero-row writes, SET TBLPROPERTIES) that keep nodes reused, and real new data or a changed seed file that rebuilds them. The live test runs twice, with `use_materialization_v2` off and on, and also covers contracts with a primary key, a row filter, column masks, date-window and stamp models, and a table swapped in by `use_safer_relation_operations`. The same live suite passes on a second, independent Databricks workspace (2026-10-21). The `postgres` store is tested end to end against Databricks Lakebase. It has not run in a large production project yet. Before enabling reuse in production, run in shadow mode for at least a week of scheduled runs and review its decisions. See [the rollout guidance](docs/operations.md#rollout).
 
 ## Why "hodor"
 
@@ -173,7 +173,13 @@ uv run ruff format
 
 The live Databricks test is opt-in: see [docs/development.md](docs/development.md#tests).
 
-Build a wheel with `uv build`. The package is not published to any index yet.
+`dbt-hodor` is available on [PyPI](https://pypi.org/project/dbt-hodor/):
+
+```sh
+pip install dbt-hodor
+```
+
+To build a wheel from the source checkout, run `uv build`.
 
 ## Contributing
 

@@ -25,7 +25,7 @@ It needs no dbt platform account and sends nothing to external services. State l
 
 !!! warning "Status: early development"
 
-    hodor runs inside dbt and passes end-to-end tests on dbt-duckdb. Tested live on a Databricks Unity Catalog workspace with a SQL warehouse and dbt-databricks 1.12.7, including seeds, snapshots, `replace_where`, contracts, row filters, column masks and `use_materialization_v2` on and off. The same live suite passes on a second, independent workspace (2026-10-21), and the `postgres` store is tested end to end against Databricks Lakebase. It has not run in a large production project yet, so start in shadow mode.
+    hodor runs inside dbt and passes end-to-end tests on dbt-duckdb. Tested live on a Databricks Unity Catalog workspace with a SQL warehouse and dbt-databricks 1.12.7, including seeds, snapshots, `replace_where`, contracts, row filters, column masks and `use_materialization_v2` on and off. The same live suite passes on a second, independent workspace (2026-10-21), and the `postgres` store is tested end to end against Databricks Lakebase. It has not run in a large production project yet. Before enabling reuse in production, run in shadow mode for at least a week of scheduled runs and review its decisions. See [the rollout guidance](operations.md#rollout).
 
 ## Why "hodor"
 
@@ -106,4 +106,4 @@ Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
 | `dbt-hodor explain` CLI | built, tested end to end on dbt-duckdb; not yet run live on Databricks |
 | `dbt-hodor prune` CLI | built, tested end to end on dbt-duckdb |
 | `postgres` store, Lakebase included | built, tested end to end against Lakebase (`pytest -m postgres`) |
-| Publishing to a package index | not done; the package is not published |
+| PyPI package | [published](https://pypi.org/project/dbt-hodor/) |

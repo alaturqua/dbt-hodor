@@ -727,11 +727,10 @@ svg.door { width:100%; max-height:250px; }
   <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, and dbt-duckdb for local development and tests.</p>
 
   <h3 id="d-install">Install</h3>
-  <p>The package is not on any index yet. Build a wheel and install it in the environment where dbt runs. dbt loads any installed module named <code>dbt_*</code> that has a <code>plugins</code> list, so there is nothing to configure in dbt.</p>
-<pre><code>uv build
-pip install dist/dbt_hodor-0.1.0-py3-none-any.whl
+  <p>Install dbt-hodor from PyPI in the environment where dbt runs. dbt loads any installed module named <code>dbt_*</code> that has a <code>plugins</code> list, so there is nothing to configure in dbt.</p>
+<pre><code>pip install dbt-hodor
 # local DuckDB state store:
-pip install "dist/dbt_hodor-0.1.0-py3-none-any.whl[duckdb]"</code></pre>
+pip install "dbt-hodor[duckdb]"</code></pre>
   <p>Requires Python 3.10 or newer. If upstream <code>dbt_state</code> is also installed, hodor disables itself with a warning.</p>
 
   <h3 id="d-node">Node configs</h3>
@@ -994,7 +993,7 @@ Run again with --yes to delete them.</code></pre>
     $('#cellsum').textContent = 'Out of 100 nodes: ' + p + ' build (amber), ' + (100 - p) + ' are reused (teal).';
     setLog('#log1', [
       ['l-dim', '$ dbt build'],
-      ['l-dim', 'dbt-hodor 0.1.0: mode on, 100 nodes selected (illustration)'],
+      ['l-dim', 'dbt-hodor <installed version>: mode on, 100 nodes selected (illustration)'],
       ['l-reuse', ln('(' + (100 - p) + ' nodes) REUSED', 'REUSED (no_new_data)')],
       ['l-ok', ln('(' + p + ' nodes) OK created', 'OK (code_changed or new_upstream_data)')],
       ['l-sum', 'dbt-hodor: ' + (100 - p) + ' reused, ' + p + ' built, 0 fail-open errors']
@@ -1005,7 +1004,7 @@ Run again with --yes to delete them.</code></pre>
 
   setLog('#log2', [
     ['l-dim', '$ dbt build'],
-    ['l-dim', 'dbt-hodor 0.1.0 is enabled for dbt build'],
+    ['l-dim', 'dbt-hodor <installed version> is enabled for dbt build'],
     ['l-reuse', ln('1 of 4 REUSED sql table model main.node_1', 'REUSED (no_new_data) in 0.01s')],
     ['l-ok', ln('2 of 4 OK created sql table model main.node_2', 'OK (code_changed) in 0.07s')],
     ['l-reuse', ln('3 of 4 REUSED sql table model main.node_3', 'REUSED (no_new_data) in 0.01s')],
@@ -1033,8 +1032,8 @@ Run again with --yes to delete them.</code></pre>
   var SHORT = { start: 'dbt starts', plugin: 'Plugin loads', first: 'Load state', hash: 'Hash SQL', cfg: 'Config hash', up: 'Upstream data', decide: 'Engine decides', reuse: 'REUSE', build: 'BUILD', rec: 'Append record', flush: 'Flush', sum: 'Summary' };
   var FLOGS = {
     start: [['l-dim', '$ dbt build']],
-    plugin: [['l-dim', 'dbt-hodor 0.1.0 is enabled for dbt build']],
-    first: [['l-dim', 'dbt-hodor 0.1.0: mode on, 8 build records for hodor_e2e/local']],
+    plugin: [['l-dim', 'dbt-hodor <installed version> is enabled for dbt build']],
+    first: [['l-dim', 'dbt-hodor <installed version>: mode on, 8 build records for hodor_e2e/local']],
     hash: [['l-dim', 'dbt-hodor: main.fct_orders code hash equals the record (fast path)']],
     cfg: [['l-dim', 'dbt-hodor: main.fct_orders config hash equals the record']],
     up: [['l-dim', 'dbt-hodor: upstream raw.orders data version v41, recorded v41']],
@@ -1176,9 +1175,9 @@ Run again with --yes to delete them.</code></pre>
       if (it.k === 'm' && it.id !== 'stg') { m.q += 1; m.t += 0.2; m.cs += 0.5; }
     }
     push('$ dbt build', 'l-dim', null, null, true);
-    push('dbt-hodor 0.1.0 is enabled for dbt build', 'l-dim');
+    push('dbt-hodor <installed version> is enabled for dbt build', 'l-dim');
     m.q += 3; m.t += 1.1; m.cs += 1.5;
-    push('dbt-hodor 0.1.0: mode ' + sc.mode + ', ' + sc.rec + ' build records for hodor_e2e/local', 'l-dim');
+    push('dbt-hodor <installed version>: mode ' + sc.mode + ', ' + sc.rec + ' build records for hodor_e2e/local', 'l-dim');
     sec += 2;
     SI.forEach(function (it, ix) {
       var i = (ix + 1) + ' of 8', label = it.k === 'm' ? it.w : 'test ' + it.name;
@@ -1456,7 +1455,7 @@ Run again with --yes to delete them.</code></pre>
     l1.innerHTML = 'Decision <span class="chip ' + r.d + '">' + r.d.toUpperCase() + '</span> reason <code>' + code + '</code>';
     hel('p', '', result, s[2]);
     var view = r.r === 'view_unchanged' || r.r === 'select_star_view', nm = view ? 'sql view model main.stg_orders' : 'sql table model main.fct_orders', could = r.d === 'reuse';
-    var ll = [['l-dim', '$ dbt build'], ['l-dim', 'dbt-hodor 0.1.0: mode ' + (sh ? 'shadow' : 'on') + ', 8 build records for hodor_e2e/local']];
+    var ll = [['l-dim', '$ dbt build'], ['l-dim', 'dbt-hodor <installed version>: mode ' + (sh ? 'shadow' : 'on') + ', 8 build records for hodor_e2e/local']];
     if (r.r === 'hodor_error') ll.push(['l-warn', 'dbt-hodor: deciding model.hodor_e2e.fct_orders failed, building it: KeyError: \'upstreams\' (simulated)']);
     if (sh) ll.push(['l-ok', ln('1 of 1 OK created ' + nm, 'OK (' + (could ? 'shadow, could reuse: ' : '') + code + ') in 0.06s')]);
     else if (could) ll.push(['l-reuse', ln('1 of 1 REUSED ' + nm, 'REUSED (' + code + ') in 0.01s')]);
@@ -1690,7 +1689,7 @@ Run again with --yes to delete them.</code></pre>
     renderTiles($('#mmeters'), { compact: true, started: true, shadow: mode === 'shadow', M: NODES.length, reuse: nre, built: nbuilt, errs: errs, q: mq, qb: mqb, t: mt, tb: mtb, cs: mcs, csb: mcsb, done: true });
     var ll = [];
     if (mode === 'off') ll.push(['l-dim', 'dbt-hodor: mode off, nothing patched, no records written']);
-    else ll.push(['l-dim', 'dbt-hodor 0.1.0: mode ' + mode + ', 8 build records for hodor_e2e/local']);
+    else ll.push(['l-dim', 'dbt-hodor <installed version>: mode ' + mode + ', 8 build records for hodor_e2e/local']);
     NODES.forEach(function (n, i) {
       var reason = n[1], wr = !!RD[reason], er = inj && i === 5 && mode !== 'off', pre = (i + 1) + ' of 8 ';
       if (er) { reason = 'hodor_error'; wr = false; ll.push(['l-warn', 'dbt-hodor: deciding model.hodor_e2e.' + n[0] + ' failed, building it: KeyError: \'upstreams\' (simulated)']); }

@@ -9,7 +9,8 @@ uv run ruff check
 uv run ruff format
 ```
 
-Build a wheel with `uv build`. The package is not published to any index yet.
+`dbt-hodor` is available on [PyPI](https://pypi.org/project/dbt-hodor/).
+Build a wheel from the source checkout with `uv build`.
 
 CI builds a wheel and an sdist on every push to `main` and keeps them for 14 days, so an
 installable build is always at hand without cutting a release:
@@ -33,8 +34,8 @@ uv run git-cliff --output CHANGELOG.md      # rewrite the changelog
 
 A release is a `v*` tag. The release workflow refuses to build when the tag and the version
 in `pyproject.toml` disagree, runs the checks on the tagged commit, generates the notes for
-that tag and drafts a GitHub release with the wheel and the sdist. Publishing to PyPI and
-deploying the docs site are both gated behind repository variables and are off.
+that tag and drafts a GitHub release with the wheel and the sdist. Its PyPI publishing job
+is gated by the `PUBLISH_TO_PYPI` repository variable and PyPI trusted-publisher configuration.
 
 The benchmarks are marked `benchmark` and skipped by default. Run them with `uv run pytest -m benchmark`.
 
