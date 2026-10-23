@@ -73,17 +73,20 @@ def _when(ms: int) -> str:
     return dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
+HEX = set("0123456789abcdef")
+
+
 def _short(value: object, width: int) -> str:
     text = "none" if value is None else str(value)
     return text if len(text) <= width else text[: width - 3] + "..."
 
 
 def _digest(value: object) -> str:
-    """qualify:<sha256> as qualify:<first 8 hex digits>."""
+    """qualify:<sha256>:<reads> as qualify:<first 8 hex digits>:<first 8 hex digits>."""
     if value is None:
         return "none"
-    kind, _, digest = str(value).rpartition(":")
-    return f"{kind}:{digest[:8]}" if kind else digest[:8]
+    parts = str(value).split(":")
+    return ":".join(p[:8] if len(p) > 8 and all(c in HEX for c in p) else p for p in parts)
 
 
 def _compare(last: object, now: object, show: Callable[[object], str]) -> str:

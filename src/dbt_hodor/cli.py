@@ -20,11 +20,19 @@ def _ident(value: str) -> str:
     return value
 
 
+def _days(value: str) -> int:
+    if not value.isdigit():
+        raise argparse.ArgumentTypeError(f"expected 0 or more days, got {value!r}")
+    return int(value)
+
+
 def _ddl(args: argparse.Namespace) -> str:
     if args.store == "delta":
         if not args.database or not args.schema:
             raise SystemExit("dbt-hodor ddl: --database and --schema are required for delta")
         table = ".".join(f"`{p}`" for p in (args.database, args.schema, args.table))
+    elif args.store == "postgres" and not args.schema:
+        raise SystemExit("dbt-hodor ddl: --schema is required for postgres")
     else:
         table = ".".join(f'"{p}"' for p in (args.schema or "main", args.table))
     return create_table_sql(table, "duckdb" if args.store == "duckdb" else args.store) + ";"
@@ -159,7 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     prune.add_argument(
         "--keep-days",
-        type=int,
+        type=_days,
         metavar="N",
         help="keep records of the last N days (default: hodor_lookback_days)",
     )

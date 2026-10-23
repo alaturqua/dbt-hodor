@@ -15,6 +15,8 @@ KINDS = ("table", "incremental", "seed", "snapshot", "view", "test", "unsupporte
 _OWN_DATA_KINDS = ("table", "incremental", "seed", "snapshot")
 # Upstream groups for volatile SQL values (volatile:date, volatile:session, volatile:always).
 VOLATILE_PREFIX = "volatile:"
+# Upstream groups for the code of the views a node reads through: {code:<unique_id>: code hash}.
+CODE_PREFIX = "code:"
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ def _group_changed(group: Mapping[str, DataVersion], last: Record) -> bool:
 
 
 def decide(facts: NodeFacts, last: Record | None, cfg: NodeStateConfig, now_ms: int) -> Decision:
-    """Rules 2-14 of the design, first match wins. Shadow mode (rule 1) is the caller's job."""
+    """Rules 2-15 of the design, first match wins. Shadow mode (rule 1) is the caller's job."""
     if facts.full_refresh:
         return Decision(BUILD, "full_refresh")
     if facts.kind not in KINDS or facts.kind == "unsupported":
@@ -67,7 +69,8 @@ def decide(facts: NodeFacts, last: Record | None, cfg: NodeStateConfig, now_ms: 
         return Decision(BUILD, "code_changed")
     if facts.config_hash != last.config_hash:
         return Decision(BUILD, "config_changed")
-    if facts.kind in _OWN_DATA_KINDS and (
+    # a view's version is its definition: a run without hodor may have replaced it
+    if (facts.kind in _OWN_DATA_KINDS or facts.kind == "view") and (
         not facts.target_data_version.known or facts.target_data_version.token != last.data_version
     ):
         return Decision(BUILD, "target_modified")
@@ -79,13 +82,17 @@ def decide(facts: NodeFacts, last: Record | None, cfg: NodeStateConfig, now_ms: 
     groups = facts.upstream_groups
     if any(g is None or not all(v.known for v in g.values()) for g in groups.values()):
         return Decision(BUILD, "unknown_upstream")
-    changed = [_group_changed(g, last) for k, g in groups.items() if not _volatile(k)]  # type: ignore[arg-type]
+    # a view in between changed its SQL: the rows this node reads changed, whatever their data
+    if any(_group_changed(g, last) for k, g in groups.items() if k.startswith(CODE_PREFIX)):  # type: ignore[arg-type]
+        return Decision(BUILD, "upstream_code_changed")
+    data = {k: g for k, g in groups.items() if not k.startswith(CODE_PREFIX)}
+    changed = [_group_changed(g, last) for k, g in data.items() if not _volatile(k)]  # type: ignore[arg-type]
     if cfg.require_fresh_data_from == "all":
         fresh = bool(changed) and all(changed)
     else:
         fresh = any(changed)
     # a new date or user is new data on its own, even with require_fresh_data_from: all
-    volatile = any(_group_changed(g, last) for k, g in groups.items() if _volatile(k))  # type: ignore[arg-type]
+    volatile = any(_group_changed(g, last) for k, g in data.items() if _volatile(k))  # type: ignore[arg-type]
     if not fresh and not volatile:
         return Decision(REUSE, "no_new_data")
 

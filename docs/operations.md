@@ -77,14 +77,13 @@ Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
 
 ## Known limits
 
-- **Adapter macro changes.** A change to dbt's or the adapter's own macros, for example a dbt-databricks upgrade, does not show in any hash. Run once with `HODOR_MODE=off` after such an upgrade. Project and package macros that a materialization or a hook runs are in the config hash.
+- **Adapter macro changes.** A change to dbt's or the adapter's own macros, for example a dbt-databricks upgrade, does not show in any hash. Run once with `HODOR_MODE=shadow` after such an upgrade: shadow builds every node and records the builds. `off` records nothing, so the old records would still count. Project and package macros that a materialization or a hook runs are in the config hash.
 - **Volatile SQL stamps.** A volatile function in a stamp column (an output column of the final `SELECT` that reads no column, such as `current_date() as report_date`) does not count, so on reuse it keeps the value of the last build. Set `evaluate_volatile_sql: true` where a stamp must follow the clock. `is_member()` is approximated by the current user.
 - **First incremental run.** The first incremental run after a full build compiles different SQL (the `is_incremental()` branch), so it builds once more.
 - **CTE renames** count as code changes and cause one extra build.
 - **Untraceable inputs.** `read_files(...)`, other table functions and non-Delta sources are unknown, so their dependents always build.
 - **DuckDB state file.** One process at a time.
-- **Databricks.** Tested live on one workspace with a small project, with `use_materialization_v2` off and on, not yet in a large production project. Delta paths on Volumes were not tested.
-- **Planned, not built:** a `dbt-hodor prune` command for state retention.
+- **Databricks.** Not yet run in a large production project. Delta paths on Volumes are not tested.
 
 ## Scope of v1
 
@@ -92,7 +91,7 @@ Supported: models materialized as `table`, `incremental` (append, merge, delete+
 
 Always built as plain dbt:
 
-- clones and deferral
+- the node configs `pre_clone`, `allow_clones` and `defer_to_target` (for `--defer` and `dbt clone` in CI, see [Slim CI](slim-ci.md))
 - Python models
 - microbatch models
 - materialized views and streaming tables

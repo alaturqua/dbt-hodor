@@ -22,7 +22,7 @@ dbt-hodor is a free, self-hosted alternative to dbt Labs' [dbt State](https://do
 
 It needs no dbt platform account and sends nothing to external services. State lives in a Delta table on Databricks, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 
-> **Status: early development.** hodor runs inside dbt and passes end-to-end tests on dbt-duckdb. Tested live on a Databricks Unity Catalog workspace with a SQL warehouse and dbt-databricks 1.12.7 (2026-10-20 and 2026-10-21): reuse of tables, incremental models (including `replace_where`), views, seeds and snapshots, replayed tests, maintenance commits (OPTIMIZE, zero-row writes, SET TBLPROPERTIES) that keep nodes reused, and real new data or a changed seed file that rebuilds them. The live test runs twice, with `use_materialization_v2` off and on, and also covers contracts with a primary key, a row filter, column masks, date-window and stamp models, and a table swapped in by `use_safer_relation_operations`. The same live suite passes on a second, independent Databricks workspace (2026-10-21). The `postgres` store is tested end to end against Databricks Lakebase. It has not run in a large production project yet. Before enabling reuse in production, run in shadow mode for at least a week of scheduled runs and review its decisions. See [the rollout guidance](docs/operations.md#rollout).
+> **Status: early development.** hodor has end-to-end tests on dbt-duckdb and live tests on a Databricks SQL warehouse and on Databricks Lakebase; [the test docs](docs/development.md#tests) list what they cover. It has not run in a large production project yet. Before enabling reuse in production, run in shadow mode for at least a week of scheduled runs and review its decisions. See [the rollout guidance](docs/operations.md#rollout). Changes between releases, including the breaking ones, are in [Upgrading](docs/upgrading.md).
 
 ## Why "hodor"
 
@@ -59,6 +59,7 @@ Every failure leads to a build, never to a reuse. An error while deciding, a sto
 | `select_star_view` | build |
 | `view_unchanged` | reuse |
 | `unknown_upstream` | build |
+| `upstream_code_changed` | build |
 | `no_new_data` | reuse |
 | `within_lag_tolerance` | reuse |
 | `new_upstream_data` | build |
@@ -156,9 +157,16 @@ Supported: models materialized as `table`, `incremental` (append, merge, delete+
 
 Model versions: each version is its own node with its own table and records. Moving `latest_version` rebuilds the models that `ref()` it.
 
-Always built as plain dbt: clones and deferral, Python models, microbatch, materialized views, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.
+Slim CI: `--defer` and `--favor-state` are supported, and each push of a pull request reuses what the last push built. See [Slim CI](docs/slim-ci.md). The node configs `pre_clone`, `allow_clones` and `defer_to_target` are not.
 
-Known limit: a change to dbt's or the adapter's own macros, for example a dbt-databricks upgrade, does not show in any hash. Run once with `HODOR_MODE=off` after such an upgrade. Project and package macros that a materialization or a hook runs are in the config hash.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/slim-ci-dark.svg">
+  <img src="docs/assets/slim-ci-light.svg" alt="A pull request builds its changed model in the CI catalog, reads unchanged parents from the base target through defer, and keeps its build records apart from the base target's">
+</picture>
+
+Always built as plain dbt: Python models, microbatch, materialized views, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.
+
+Known limit: a change to dbt's or the adapter's own macros, for example a dbt-databricks upgrade, does not show in any hash. Run once with `HODOR_MODE=shadow` after such an upgrade: shadow builds every node and records the builds. `off` records nothing, so the old records would still count. Project and package macros that a materialization or a hook runs are in the config hash.
 
 ## Development
 

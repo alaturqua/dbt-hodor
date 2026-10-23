@@ -24,7 +24,7 @@ snapshots:
 | `lag_tolerance` | `45m` | `0s`, `45m`, `4h`, `1d`, `1w`, integer seconds, or `{count: 4, period: hour}` |
 | `require_fresh_data_from` | `any` | `any`: build when any upstream has new data. `all`: build only when all of them have. |
 | `compare_unrendered_code` | `false` | `true`: build only when both the rendered and the unrendered code changed |
-| `execute_hooks_on_any_reuse` | `false` | `true`: run pre- and post-hooks on a reused node. `execute_hooks_on_reuse` is also accepted. |
+| `execute_hooks_on_any_reuse` | `false` | `true`: run pre- and post-hooks on a reused node. `execute_hooks_on_reuse` is also accepted. All hooks are rendered before the first one runs, so a hook cannot query what an earlier hook wrote. |
 | `evaluate_volatile_sql` | auto | Auto: volatile functions such as `current_date()`, `current_user()` and `current_timestamp()` count as an upstream that changes, unless they only fill a stamp column. `true`: stamp columns count too. `false`: they never count (the dbt State default). |
 
 `pre_clone`, `allow_clones` and `defer_to_target` are accepted and ignored, with a warning. Unknown keys are ignored with a warning. An invalid value warns and keeps the default.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
@@ -31,14 +32,47 @@ def normalize_relation(name: str) -> str:
 
 
 class Lineage:
-    """Base tables per node, memoized for the run (views are expanded once, not per child)."""
+    """Base tables per node, memoized for the run (views are expanded once, not per child).
 
-    def __init__(self, graph: Mapping[str, GraphNode]) -> None:
+    deferred: nodes that also exist under another name in the --defer state. A view or
+    ephemeral model may read either one, so expanding it through such a parent gives unknown,
+    unless the run told us what the view's own SQL reads (set_reads).
+    """
+
+    def __init__(
+        self, graph: Mapping[str, GraphNode], deferred: AbstractSet[str] = frozenset()
+    ) -> None:
         self._graph = graph
+        self._deferred = deferred
+        self._reads: dict[str, frozenset[str] | None] = {}
         self._memo: dict[str, object] = {}
+        self._lock = threading.RLock()  # dbt's threads share the memo
+        self._children: dict[str, list[str]] = {}
+        for node in graph.values():
+            for parent in node.parents:
+                self._children.setdefault(parent, []).append(node.unique_id)
+
+    def set_reads(self, unique_id: str, tables: frozenset[str] | None) -> None:
+        """The base tables a view reads, from its compiled SQL in this run."""
+        with self._lock:
+            self._reads[unique_id] = tables
+            # forget the views and ephemerals expanded through this one; a table stops the walk
+            stack, seen = [unique_id], set()
+            while stack:
+                uid = stack.pop()
+                node = self._graph.get(uid)
+                if uid in seen or node is None or (node.materialized or "view") not in PASS_THROUGH:
+                    continue
+                seen.add(uid)
+                self._memo.pop(uid, None)
+                stack.extend(self._children.get(uid, ()))
 
     def base_tables(self, unique_id: str) -> frozenset[str] | None:
         """Tables whose data the node exposes; None when any of them is unknown."""
+        with self._lock:
+            return self._base_tables(unique_id)
+
+    def _base_tables(self, unique_id: str) -> frozenset[str] | None:
         cached = self._memo.get(unique_id)
         if cached is _IN_PROGRESS:
             return None  # a cycle: the manifest is a DAG, so treat as unknown
@@ -57,17 +91,34 @@ class Lineage:
             return frozenset({node.relation}) if node.relation else None
         if (node.materialized or "view") not in PASS_THROUGH:
             return None
+        if unique_id in self._reads:
+            return self._reads[unique_id]
         tables: set[str] = set()
         for parent in node.parents:
+            if parent in self._deferred:
+                return None
             parent_tables = self.base_tables(parent)
             if parent_tables is None:
                 return None
             tables |= parent_tables
         return frozenset(tables)
 
-    def upstream_groups(self, unique_id: str) -> dict[str, frozenset[str] | None]:
-        """Map each direct parent to the base tables it reads, or None when unknown."""
-        return {parent: self.base_tables(parent) for parent in self._graph[unique_id].parents}
+    def views(self, unique_id: str) -> set[str]:
+        """The views a read of this node goes through, the node itself included. An ephemeral
+        model is inlined, so its own SQL is in the reader's code hash."""
+        found: set[str] = set()
+        stack = [unique_id]
+        while stack:
+            node = self._graph.get(stack.pop())
+            if node is None or node.unique_id in found or node.resource_type == "source":
+                continue
+            materialized = node.materialized or "view"
+            if materialized not in PASS_THROUGH:
+                continue
+            if materialized == "view":
+                found.add(node.unique_id)
+            stack.extend(node.parents)
+        return found
 
 
 @dataclass(frozen=True)

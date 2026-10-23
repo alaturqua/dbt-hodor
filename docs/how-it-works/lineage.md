@@ -14,6 +14,10 @@ Parents come from `depends_on.nodes`. dbt also adds the `to` model or source of 
 
 A source gives its Delta data version. A source that is not a Delta table (a foreign table, a view) is unknown.
 
+## Deferred parents
+
+With `--defer`, dbt may compile a parent as the relation of the `--state` manifest, for example the base table instead of the CI copy. hodor checks which relation the compiled SQL names and takes that node's data version. A deferred view is expanded with the `--state` manifest, to the tables it reads in that environment. See [Slim CI](../slim-ci.md).
+
 ## External inputs
 
 Table references in the compiled SQL that match no parent or source:

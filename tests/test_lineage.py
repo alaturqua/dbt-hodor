@@ -39,13 +39,6 @@ def test_views_and_ephemerals_expand_recursively():
     assert lineage.base_tables("model.p.both") == {"c.raw.orders", "c.raw.users"}
 
 
-def test_upstream_groups_per_direct_parent():
-    assert Lineage(GRAPH).upstream_groups("model.p.fct") == {
-        "model.p.both": {"c.raw.orders", "c.raw.users"},
-        "model.p.dim": {"c.s.dim"},
-    }
-
-
 def test_unsupported_missing_and_cyclic_nodes_are_unknown():
     lineage = Lineage(GRAPH)
     assert lineage.base_tables("model.p.mv") is None
@@ -63,7 +56,7 @@ def test_base_tables_are_memoized():
             return super()._compute(unique_id)
 
     lineage = Counting(GRAPH)
-    lineage.upstream_groups("model.p.fct")
+    lineage.base_tables("model.p.both")
     lineage.base_tables("model.p.both")
     assert calls.count("model.p.stg_orders") == 1
 
@@ -77,3 +70,36 @@ def test_external_inputs_are_what_lineage_does_not_cover():
     assert inputs.delta_paths == {"/a"}
     assert inputs.unknown is False
     assert external_inputs(SqlAnalysis("x", False, opaque_inputs=True), set()).unknown is True
+
+
+def test_a_view_with_deferred_parents_is_unknown_until_its_reads_are_set():
+    lineage = Lineage(GRAPH, deferred={"source.p.raw.orders"})
+    assert lineage.base_tables("model.p.stg_orders") is None
+    lineage.set_reads("model.p.stg_orders", frozenset({"prod.raw.orders"}))
+    assert lineage.base_tables("model.p.both") == {"prod.raw.orders", "c.raw.users"}
+
+
+def test_set_reads_forgets_only_what_reads_the_view():
+    calls = []
+
+    class Counting(Lineage):
+        def _compute(self, unique_id):
+            calls.append(unique_id)
+            return super()._compute(unique_id)
+
+    lineage = Counting(GRAPH)
+    lineage.base_tables("model.p.both")
+    lineage.base_tables("model.p.dim")
+    calls.clear()
+    lineage.set_reads("model.p.stg_orders", frozenset({"prod.raw.orders"}))
+    assert lineage.base_tables("model.p.both") == {"prod.raw.orders", "c.raw.users"}
+    lineage.base_tables("model.p.dim")
+    assert sorted(calls) == ["model.p.both", "model.p.stg_orders"]
+
+
+def test_views_lists_the_views_a_read_goes_through():
+    lineage = Lineage(GRAPH)
+    assert lineage.views("model.p.both") == {"model.p.both", "model.p.stg_orders"}
+    assert lineage.views("model.p.eph_users") == set()  # inlined, and it reads a source
+    assert lineage.views("model.p.dim") == set()  # a table stops the walk
+    assert lineage.views("model.p.loop_a") == {"model.p.loop_a", "model.p.loop_b"}

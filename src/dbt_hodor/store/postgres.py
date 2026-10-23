@@ -130,7 +130,9 @@ class PostgresStore:
     ) -> list[tuple] | None:
         with self._con.cursor() as cur:
             if many is not None:
-                cur.executemany(sql, many)
+                # all or nothing, so the retry after a dropped connection writes no row twice
+                with self._con.transaction():
+                    cur.executemany(sql, many)
                 return None
             cur.execute(sql, params)
             return cur.fetchall() if cur.description else None

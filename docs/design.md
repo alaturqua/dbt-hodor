@@ -32,7 +32,7 @@ Main target: large scheduled dbt runs on Databricks that rebuild every model in 
 
 - Per-node decision for `dbt run`, `dbt build`, `dbt test`, `dbt seed` and `dbt snapshot`: reuse or build.
 - Models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where) and `view`. An unset incremental strategy counts as merge, the dbt-databricks default (upstream wrongly maps it to append). Custom strategies build as unsupported. These are the dbt-databricks 1.12.7 strategies (`valid_incremental_strategies`, `impl.py:962`) except `microbatch`.
-- Seeds and snapshots (added 2026-10-20). Both follow the table rules. A seed's code hash is the sha256 of its CSV file with line endings normalized: dbt's own checksum covers only the path for seeds above `--maximum-seed-size-mib`. `dbt seed --show` always builds, because it prints each result's loaded table.
+- Seeds and snapshots. Both follow the table rules. A seed's code hash is the sha256 of its CSV file with line endings normalized: dbt's own checksum covers only the path for seeds above `--maximum-seed-size-mib`. `dbt seed --show` always builds, because it prints each result's loaded table.
 - Data tests (generic and singular): the recorded result is replayed when nothing they test has changed.
 - Model configs `lag_tolerance`, `require_fresh_data_from`, `compare_unrendered_code`, `execute_hooks_on_any_reuse`.
 - `--full-refresh` always builds.
@@ -42,8 +42,8 @@ Main target: large scheduled dbt runs on Databricks that rebuild every model in 
 
 ### Out of v1, always built as normal dbt
 
-- Clone of any kind (`pre_clone`, `allow_clones`), auto-deferral (`defer_to_target`), and `state:*` selectors backed by hodor.
-- Python models, microbatch models, materialized views, streaming tables, metric views, custom materializations and unit tests. Weighed on 2026-10-20: microbatch windows depend on the run time, so a reuse could skip a new window; Python models have no SQL to trace inputs from; dbt-databricks already turns an unchanged metric view into `select 1`; unit tests may come later.
+- The node configs `pre_clone`, `allow_clones` and `defer_to_target`, and `state:*` selectors backed by hodor. dbt's own `--defer` is supported (see [Slim CI](slim-ci.md)).
+- Python models, microbatch models, materialized views, streaming tables, metric views, custom materializations and unit tests. Reasons: microbatch windows depend on the run time, so a reuse could skip a new window; Python models have no SQL to trace inputs from; dbt-databricks already turns an unchanged metric view into `select 1`; unit tests may come later.
 - dbt v2 (Fusion).
 
 Configs that are out of scope are accepted and ignored, with one warning per run.
@@ -96,26 +96,27 @@ The engine checks the following rules in order. The first rule that matches deci
 
 | # | Condition | Decision | Reason code |
 | --- | --- | --- | --- |
-| 1 | mode is `shadow` | build anyway; the record keeps the decision and reason from rules 2-14, with mode `shadow` | reason from rules 2-14 |
+| 1 | mode is `shadow` | build anyway; the record keeps the decision and reason from the other rules, with mode `shadow` | reason from the other rules |
 | 2 | `--full-refresh`, or the node config sets `full_refresh: true` | build | `full_refresh` |
 | 3 | resource type, materialization or incremental strategy is out of scope (section 3) | build | `unsupported` |
 | 4 | no earlier successful build record for this node | build | `no_history` |
 | 5 | the relation is missing from the warehouse (dbt's relation cache) | build | `relation_missing` |
 | 6 | the code hash differs from the record (with `compare_unrendered_code`: rendered and unrendered hashes both differ) | build | `code_changed` |
 | 7 | the config hash differs from the record | build | `config_changed` |
-| 8 | tables and incrementals only: the target's current data version differs from the data version recorded after its last build (something wrote data to it outside this node's builds). Maintenance commits such as OPTIMIZE do not change the data version, so they never trigger this rule | build | `target_modified` |
+| 8 | tables, incrementals and views: the target's current data version differs from the data version recorded after its last build (something wrote data to it outside this node's builds). Maintenance commits such as OPTIMIZE do not change the data version, so they never trigger this rule. A view's data version is a hash of its definition in the warehouse | build | `target_modified` |
 | 9 | a view whose final `SELECT *` reads directly from a `ref()` or `source()` | build | `select_star_view` |
 | 10 | the node is a view (its definition is unchanged, see rule 6) | reuse | `view_unchanged` |
 | 11 | any upstream table has an unknown data version (section 7.2) | build | `unknown_upstream` |
-| 12 | no upstream changed since the last build (`any`), or not all of them changed (`all`) | reuse | `no_new_data` |
-| 13 | upstream changed, but the last build is younger than `lag_tolerance` | reuse | `within_lag_tolerance` |
-| 14 | otherwise | build | `new_upstream_data`, or `volatile_sql` when only volatile values changed |
+| 12 | a view between this node and its upstream tables has other code than at the node's last build | build | `upstream_code_changed` |
+| 13 | no upstream changed since the last build (`any`), or not all of them changed (`all`) | reuse | `no_new_data` |
+| 14 | upstream changed, but the last build is younger than `lag_tolerance` | reuse | `within_lag_tolerance` |
+| 15 | otherwise | build | `new_upstream_data`, or `volatile_sql` when only volatile values changed |
 
-Rule 10 follows dbt State: a view always shows current upstream data, so new data alone never requires rebuilding a view. It comes before rule 11 because a view stores no data, so an unknown upstream does not make a view stale.
+Rule 10 follows dbt State: a view always shows current upstream data, so new data alone never requires rebuilding a view. It comes before rule 11 because a view stores no data, so an unknown upstream does not make a view stale. Rule 12 covers the other side: a node that reads through a view builds when the code hash of that view's last build changed. A view without a build record counts as unknown (rule 11).
 
 - **"Upstream changed"**: an upstream table's current data version differs from the data version recorded for it at the node's last build. Versions are compared for equality, not order, and the token holds the commit time, so a dropped and recreated table (Delta versions restart at 0) still counts as changed.
 - **"Last build"**: the `built_at_ms` of the latest record with action `build`. Reuse records do not reset the clock.
-- **Tests** use rules 2-8, 11, 12 and 14. Their upstreams are the nodes they test. `lag_tolerance` is always 0 for tests, as in upstream.
+- **Tests** use every rule except the view rules (`select_star_view`, `view_unchanged`) and `within_lag_tolerance`. Their upstreams are the nodes they test. `lag_tolerance` is always 0 for tests, as in upstream.
 - **Fail open.** An exception anywhere in hodor for a node is logged as a warning, and the node builds as normal dbt would (reason `hodor_error`). hodor never fails a dbt run.
 
 ## 6. Hashing
@@ -155,7 +156,7 @@ Every record carries `hash_version`, which is hodor's own algorithm version. A r
 ### Consequences
 
 - A macro change that leaves a node's compiled SQL unchanged does not rebuild that node. `state:modified.macros` fans such changes out to every model that uses the macro.
-- A materialization-macro change, for example a dbt-databricks upgrade, is not visible in the compiled SQL. For such upgrade runs, run once with `HODOR_MODE=off`. This is documented as a known limit.
+- A materialization-macro change, for example a dbt-databricks upgrade, is not visible in the compiled SQL. For such upgrade runs, run once with `HODOR_MODE=shadow`, which builds every node and records the builds. This is documented as a known limit.
 - The first incremental run after a full build compiles different SQL (the `is_incremental()` branch). That causes one extra build, as with dbt State.
 
 ## 7. Upstream data changes
@@ -167,7 +168,7 @@ A data version is an opaque text token. The engine only compares tokens for equa
 **Databricks (Delta history).** `DESCRIBE HISTORY <table>` lists commits with `version`, `timestamp`, `operation` and `operationMetrics`.
 
 - Known maintenance and metadata operations never count as a data change: OPTIMIZE, VACUUM START, VACUUM END, ANALYZE, COMPUTE STATS, SET TBLPROPERTIES, UNSET TBLPROPERTIES, CHANGE COLUMN (column comments from `persist_docs`), ADD CONSTRAINT, DROP CONSTRAINT, UPGRADE PROTOCOL, SET TAGS, UNSET TAGS, CLUSTER BY, REORG, FSCK.
-- Every other operation counts as a data change, unless its row metrics are all zero. The row metrics are `numOutputRows`, `numTargetRowsInserted`, `numTargetRowsUpdated`, `numTargetRowsDeleted`, `numDeletedRows`, `numUpdatedRows` and `numCopiedRows`. A commit without any of them counts as a change.
+- Every other operation counts as a data change, unless its change metrics are all zero. The change metrics are `numOutputRows`, `numRemovedFiles`, `numTargetRowsInserted`, `numTargetRowsUpdated`, `numTargetRowsDeleted`, `numDeletedRows`, `numUpdatedRows` and `numCopiedRows`. A commit without any of them counts as a change. `numRemovedFiles` is there because a `CREATE OR REPLACE TABLE` or `INSERT OVERWRITE` that writes 0 rows shows `numOutputRows` at 0 but still empties the table.
 - The token is the version and the commit time of the latest data-change commit, for example `7@1792465200000`. The commit time matters: a table that is dropped and recreated, or swapped in from a staging table (`use_safer_relation_operations` with `use_materialization_v2`), restarts its versions, so the version alone can repeat after a real change. If the history window (`LIMIT 20`) holds no data-change commit, the version is unknown, so dependents build.
 - Unknown operations count as changes on purpose: a new Delta operation name can cause extra builds, never wrong reuses. The spike (section 11) confirms operation names and how zero-row writes appear.
 
@@ -286,7 +287,7 @@ Set as keys on the active `profiles.yml` target. An environment variable of the 
 - **Default mode:** `shadow`, so installing the package never skips anything until someone opts in.
 - **Store location:** database, schema and table are separate settings, each checked against `^[A-Za-z0-9_][A-Za-z0-9_-]*$` and always quoted. `delta` has no default schema, so hodor writes nothing to a catalog until someone names one; without it hodor is off with a warning. `delta` never creates the schema (that needs catalog-level grants); `duckdb` and `postgres` create schema and table.
 - **Env prefix:** `HODOR_` keeps clear of dbt's reserved `DBT_ENGINE_` prefix.
-- **Per run (added 2026-10-21):** `hodor_<name>` keys in `--vars` override the profile key. Precedence: env var, `--vars`, profile key, default. A plugin cannot add CLI flags: dbt parses them before plugins load (`dbt/cli/requires.py:333`), so `--no-hodor` fails with `No such option`. `--manage-state` does not exist in dbt-core 1.12, and `DBT_ENGINE_MANAGE_STATE` warns there (`dbt/env_vars.py:31-41`). Both switch on dbt Labs' dbt State in 1.13, so hodor does not read them. YAML booleans `true`/`false` (unquoted `on`/`off`) are accepted for `hodor_mode`.
+- **Per run:** `hodor_<name>` keys in `--vars` override the profile key. Precedence: env var, `--vars`, profile key, default. A plugin cannot add CLI flags: dbt parses them before plugins load (`dbt/cli/requires.py:333`), so `--no-hodor` fails with `No such option`. `--manage-state` does not exist in dbt-core 1.12, and `DBT_ENGINE_MANAGE_STATE` warns there (`dbt/env_vars.py:31-41`). Both switch on dbt Labs' dbt State in 1.13, so hodor does not read them. YAML booleans `true`/`false` (unquoted `on`/`off`) are accepted for `hodor_mode`.
 - **Open item:** whether dbt-databricks accepts unknown keys in a profile target is checked in the spike. If it does not, the settings move to `dbt_project.yml` `vars: {hodor: {...}}`, still with env var override.
 
 ### 9.3 CLI
@@ -298,7 +299,7 @@ Set as keys on the active `profiles.yml` target. An environment variable of the 
 
 It prints each decision with its reason, the hashes compared and the upstream versions.
 
-Built on 2026-10-21:
+How it works:
 
 - It loads the profile and project with dbt's own loaders (`load_profile`, `load_project`, `RuntimeConfig.from_parts`), so `env_var()`, targets and `HODOR_*` overrides work as in a run. `--vars` is not read.
 - The `delta` store is read through the dbt adapter connection, not a second connector. The store opens read-only: DuckDB with `read_only=True`, Delta without the probe and `CREATE TABLE`.
@@ -335,7 +336,7 @@ Run on the dev workspace, using a Databricks profile the user chooses, in a scra
 ### 11.1 Spike results (2026-10-20, a Unity Catalog dev workspace, scratch schema)
 
 1. **`last_altered` does not move on data writes.** It stayed the same after INSERT (2 rows and 0 rows), MERGE (0 and 1 rows), UPDATE, DELETE and INSERT OVERWRITE. It moved on CREATE TABLE, SET TBLPROPERTIES, column and table comments, ANALYZE, CREATE OR REPLACE TABLE AS SELECT and CLUSTER BY. The shortcut in section 7.3 is therefore not used; every table gets `DESCRIBE HISTORY`.
-2. **History matches the rules in section 7.1.** Zero-row WRITE, MERGE, UPDATE and DELETE commits appear with all row metrics at 0 (MERGE: `numTargetRowsInserted`, `numTargetRowsUpdated`, `numTargetRowsDeleted`, `numOutputRows` all 0), so they are not data changes. A one-row MERGE shows `numTargetRowsUpdated=1`, `numOutputRows=1`. `COMMENT ON TABLE` is recorded as `SET TBLPROPERTIES`, a column comment as `CHANGE COLUMN`. ANALYZE writes no commit. OPTIMIZE on a single-file table writes no commit. VACUUM writes `VACUUM START` and `VACUUM END`. `operationMetrics` values are strings.
+2. **History matches the rules in section 7.1.** Zero-row WRITE, MERGE, UPDATE and DELETE commits appear with all row metrics at 0 (MERGE: `numTargetRowsInserted`, `numTargetRowsUpdated`, `numTargetRowsDeleted`, `numOutputRows` all 0), so they are not data changes. A `CREATE OR REPLACE TABLE AS SELECT` or `INSERT OVERWRITE` that writes 0 rows shows `numOutputRows=0` but `numRemovedFiles` above 0, so it counts. A one-row MERGE shows `numTargetRowsUpdated=1`, `numOutputRows=1`. `COMMENT ON TABLE` is recorded as `SET TBLPROPERTIES`, a column comment as `CHANGE COLUMN`. ANALYZE writes no commit. OPTIMIZE on a single-file table writes no commit. VACUUM writes `VACUUM START` and `VACUUM END`. `operationMetrics` values are strings.
 3. `DESCRIBE HISTORY` takes about 2 s per call through the CLI, including CLI start-up; the statement time itself is lower. `DESCRIBE HISTORY` on a view fails with `EXPECT_TABLE_NOT_VIEW`, so the version is unknown and dependents build. Delta paths on Volumes were not tested.
 4. dbt-databricks accepts `hodor_*` keys in a profile target (validation passes) but drops them from the credentials. hodor reads them from `profiles.yml` itself and renders them with dbt's `ProfileRenderer`.
 5. A typical job identity has `USE SCHEMA`, `SELECT`, `MODIFY` and `EXECUTE` on its operations schema, but not `CREATE TABLE`. The Delta store therefore probes the table first and creates it only when missing; an admin creates it once with `dbt-hodor ddl`. Every identity with `MODIFY` on that schema can write the state table, so check who holds it.
@@ -349,9 +350,9 @@ The results feed sections 7.1, 7.3 and 9.2 before the engine is built.
 - **Hashing:** golden tests for whitespace, comments, alias and CTE renames, `invocation_id` replacement, `select *` view detection and the parse-failure fallback. A coverage run over a large project's compiled SQL reports the parse success rate.
 - **Config:** every `lag_tolerance` form, precedence between env vars and profile keys, ignored keys.
 - **Store contract:** one shared test suite run against DuckDB (in memory), and a SQL-generation suite for Delta (statements asserted as text).
-- **Patches:** tests against the installed dbt-core 1.12.5 that check every patched symbol exists with the expected signature, so a dbt upgrade fails in CI instead of at run time.
+- **Patches:** tests against the installed dbt-core (the version range in `pyproject.toml`) that check every patched symbol exists with the expected signature, so a dbt upgrade fails in CI instead of at run time.
 - **Local end to end (default for development):** a small dbt project in `tests/e2e/` run with dbt-duckdb and the DuckDB state store through `dbtRunner`. First run builds and records, second run reuses, a changed upstream rebuilds, a changed model rebuilds, tests replay. Needs no Databricks access and runs in every test run.
-- **Databricks integration:** the same scenarios on a live workspace in a scratch schema that is dropped afterwards (`pytest -m databricks`, `tests/integration/test_databricks.py`). Passed on 2026-10-20 with dbt-databricks 1.12.7 on a SQL warehouse, and on 2026-10-21 with `replace_where`, a seed and a snapshot added.
+- **Databricks integration:** the same scenarios on a live workspace in a scratch schema that is dropped afterwards (`pytest -m databricks`, `tests/integration/test_databricks.py`). [Development](development.md#tests) lists what it covers.
 
 ## 13. Packaging (uv)
 

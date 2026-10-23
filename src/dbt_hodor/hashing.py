@@ -12,7 +12,7 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.qualify import qualify
 
-HASH_VERSION = "1"
+HASH_VERSION = "2"
 INVOCATION_PLACEHOLDER = "__hodor_invocation_id__"
 RUN_STARTED_PLACEHOLDER = "__hodor_run_started_at__"
 
@@ -296,9 +296,25 @@ def _table_refs(root: exp.Expr, ctes: Mapping[str, exp.Expr]) -> tuple[set[str],
     return tables, paths, opaque
 
 
-def analyze_sql(normalized_sql: str, dialect: str = "databricks") -> SqlAnalysis:
+def _neutralize(root: exp.Expr, relations: Mapping[str, str]) -> None:
+    """Replace each dbt relation with its node id, so the code hash does not depend on the
+    catalog or schema a target writes to (a CI catalog, pr_<nr>_ schemas, --defer)."""
+    for table in list(root.find_all(exp.Table)):
+        if not isinstance(table.this, exp.Identifier) or not (table.catalog and table.db):
+            continue
+        node = relations.get(f"{table.catalog}.{table.db}.{table.name}".lower())
+        if node is not None:
+            table.set("catalog", None)
+            table.set("db", None)
+            table.set("this", exp.to_identifier(node, quoted=True))
+
+
+def analyze_sql(
+    normalized_sql: str, dialect: str = "databricks", relations: Mapping[str, str] | None = None
+) -> SqlAnalysis:
     """Parse once; derive the code hash, the select-star flag and the table references.
 
+    relations maps lower-case catalog.schema.table names of dbt nodes to their unique_id.
     Every fallback can only cause extra builds, never wrong reuses.
     """
     try:
@@ -312,6 +328,7 @@ def analyze_sql(normalized_sql: str, dialect: str = "databricks") -> SqlAnalysis
     select_star = _star_reaches_relation(root, ctes, frozenset())
     tables, paths, opaque = _table_refs(root, ctes)
     volatile, stamps = _volatile(root)
+    _neutralize(root, relations or {})
     try:
         # In place: the analysis above is done, so the tree needs no copy.
         canonical = qualify(
@@ -325,9 +342,9 @@ def analyze_sql(normalized_sql: str, dialect: str = "databricks") -> SqlAnalysis
         method = "qualify"
     except Exception:  # noqa: BLE001 - qualify may leave the tree half-changed; re-parse
         try:
-            canonical = sqlglot.parse_one(normalized_sql, read=dialect).sql(
-                dialect=dialect, comments=False
-            )
+            reparsed = sqlglot.parse_one(normalized_sql, read=dialect)
+            _neutralize(reparsed, relations or {})
+            canonical = reparsed.sql(dialect=dialect, comments=False)
             method = "parse"
         except Exception:  # noqa: BLE001
             return _text_fallback(normalized_sql)
@@ -349,6 +366,7 @@ def analyze_node_sql(
     last_text_hash: str | None = None,
     last_sql_facts: object = None,
     dialect: str = "databricks",
+    relations: Mapping[str, str] | None = None,
 ) -> tuple[str, SqlAnalysis]:
     """Return (text_hash, analysis); reuse the last build's facts when the SQL is unchanged."""
     sql = normalize_runtime_values(compiled_sql, invocation_id, run_started_at)
@@ -357,7 +375,7 @@ def analyze_node_sql(
         cached = SqlAnalysis.from_json(last_sql_facts)
         if cached is not None:
             return key, cached
-    return key, analyze_sql(sql, dialect)
+    return key, analyze_sql(sql, dialect, relations)
 
 
 def unrendered_hash(
@@ -381,6 +399,7 @@ def config_hash(
     columns: Mapping[str, Mapping[str, object]] | None = None,
     constraints: Sequence[Mapping[str, object]] | None = None,
     macros: Mapping[str, str] | None = None,
+    hooks: Sequence[str] | None = None,
 ) -> str:
     kept = {key: value for key, value in config.items() if key not in IGNORED_CONFIG_KEYS}
     cols = {
@@ -397,4 +416,6 @@ def config_hash(
         payload["constraints"] = list(constraints)
     if macros:
         payload["macros"] = dict(macros)
+    if hooks:
+        payload["hooks"] = list(hooks)
     return _sha(_canonical_json(payload))

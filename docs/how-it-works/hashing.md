@@ -6,7 +6,7 @@ hodor hashes each node's logic, so it can tell whether the code changed.
 
 1. Take the node's compiled SQL.
 2. Replace this run's `invocation_id` and `run_started_at` values with fixed placeholders. Many models inline `'{{ invocation_id }}'`, which would otherwise change the SQL on every run.
-3. Parse with sqlglot (the adapter's dialect: `databricks` or `duckdb`) and run `qualify` with `validate_qualify_columns=False`, `expand_stars=False`, `identify=True` and `canonicalize_table_aliases=True`. This normalizes keyword and identifier case, quoting and table aliases.
+3. Parse with sqlglot (the adapter's dialect: `databricks` or `duckdb`). Replace each relation name that belongs to a node of the project, or of the `--state` manifest, with the node's `unique_id`, so a different catalog or schema per target hashes the same. A name that two nodes share stays as it is. Then run `qualify` with `validate_qualify_columns=False`, `expand_stars=False`, `identify=True` and `canonicalize_table_aliases=True`. This normalizes keyword and identifier case, quoting and table aliases.
 4. Generate SQL without comments and hash it with sha256.
 5. If `qualify` fails, hash the parsed SQL generated without comments. If parsing fails, hash the compiled text with whitespace collapsed. Both fallbacks can only cause extra builds, never wrong reuses.
 
@@ -52,11 +52,11 @@ Used only with `compare_unrendered_code`. It is the sha256 of `raw_code`, the `m
 
 ## Hash version
 
-Every record carries `hash_version`, the version of hodor's own hashing algorithm. A record with a different `hash_version` counts as `code_changed`. The sqlglot version range is pinned, and golden tests catch output drift before a sqlglot upgrade.
+Every record carries `hash_version`, the version of hodor's own hashing algorithm. A record with a different `hash_version` counts as `code_changed`. When it changes, every node builds once. [Upgrading](../upgrading.md) lists the releases that change it. The sqlglot version range is pinned, and golden tests catch output drift before a sqlglot upgrade.
 
 ## Consequences and limits
 
 - A change to a macro that the model SQL calls, including a package upgrade such as dbt_utils or dbt_date, rebuilds the node only when the compiled SQL changes.
-- A change to dbt's or the adapter's own macros, for example a dbt-databricks upgrade, does not show in any hash. Run once with `HODOR_MODE=off` after such an upgrade. Project and package macros that a materialization or a hook runs are in the config hash.
+- A change to dbt's or the adapter's own macros, for example a dbt-databricks upgrade, does not show in any hash. Run once with `HODOR_MODE=shadow` after such an upgrade: shadow builds every node and records the builds. `off` records nothing, so the old records would still count. Project and package macros that a materialization or a hook runs are in the config hash.
 - The first incremental run after a full build compiles different SQL (the `is_incremental()` branch). That causes one extra build.
 - CTE renames count as changes. This costs one extra build. hodor does not use sqlglot's `canonicalize_internal_names`, because without a schema it gave two different queries the same output, which would cause wrong reuses.
