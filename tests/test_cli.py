@@ -20,3 +20,11 @@ def test_ddl_rejects_bad_names_and_missing_parts():
         main(["ddl", "--database", "c", "--schema", "s`; drop table x"])
     with pytest.raises(SystemExit):
         main(["ddl", "--store", "delta", "--schema", "s"])
+    with pytest.raises(SystemExit):
+        main(["ddl", "--store", "postgres"])  # Postgres has no schema "main"
+
+
+def test_prune_rejects_negative_days():
+    # -1 would move the cutoff into the future and delete today's records
+    with pytest.raises(SystemExit):
+        main(["prune", "--keep-days", "-1", "--yes"])

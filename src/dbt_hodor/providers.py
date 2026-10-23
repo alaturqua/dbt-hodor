@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +18,8 @@ from dbt_hodor.metadata import (
 )
 
 HISTORY_LIMIT = 20
+# A view stores no data: its version is a hash of its definition in the warehouse.
+VIEW_PREFIX = "view:"
 
 
 @contextmanager
@@ -36,6 +39,16 @@ def fetch(adapter: Any, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
         names = [d[0] for d in cursor.description or []]
         rows = [tuple(row) for row in cursor.fetchall()] if cursor.description else []
     return names, rows
+
+
+def _literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _definition(rows: Sequence[Sequence[Any]]) -> DataVersion:
+    if not rows or rows[0][0] is None:
+        raise LookupError("no view definition")
+    return DataVersion(hashlib.sha256(str(rows[0][0]).encode("utf-8")).hexdigest())
 
 
 def _quote(relation: str, quote: str) -> str:
@@ -116,6 +129,15 @@ class DuckDBProvider(Provider):
     )
 
     def _query(self, key: str) -> DataVersion:
+        if key.startswith(VIEW_PREFIX):
+            database, schema, name = key[len(VIEW_PREFIX) :].split(".")
+            _, rows = fetch(
+                self._adapter,
+                "select sql from duckdb_views() where lower(database_name) = "
+                f"{_literal(database)} and lower(schema_name) = {_literal(schema)} "
+                f"and lower(view_name) = {_literal(name)}",
+            )
+            return _definition(rows)
         _, rows = fetch(self._adapter, duckdb_fingerprint_sql(_quote(key, '"')))
         return DataVersion(str(rows[0][0]))
 
@@ -136,6 +158,15 @@ class DeltaProvider(Provider):
         )
 
     def _query(self, key: str) -> DataVersion:
+        if key.startswith(VIEW_PREFIX):
+            catalog, schema, name = key[len(VIEW_PREFIX) :].split(".")
+            _, rows = fetch(
+                self._adapter,
+                f"select view_definition from {_quote(catalog, '`')}.information_schema.views "
+                f"where lower(table_schema) = {_literal(schema)} "
+                f"and lower(table_name) = {_literal(name)}",
+            )
+            return _definition(rows)
         if key.startswith("delta:"):
             return self._history("delta." + _quote(key[len("delta:") :], "`"))
         return self._history(_quote(key, "`"))

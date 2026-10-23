@@ -170,3 +170,14 @@ def test_a_new_date_builds_even_with_require_fresh_data_from_all(record):
     assert decide(volatile("2026-10-22"), record(upstreams=TODAY), cfg, NOW) == Decision(
         BUILD, "volatile_sql"
     )
+
+
+def test_a_changed_view_in_between_builds_whatever_the_data_and_tolerance(record):
+    view = {"code:model.p.int": {"code:model.p.int": DataVersion("sum1")}}
+    rec = record(upstreams={"c.raw.orders": "3", "c.s.dim": "12", "code:model.p.int": "sum1"})
+    same = facts(upstream_groups={**UNCHANGED, **view})
+    assert decide(same, rec, CFG, NOW) == Decision(REUSE, "no_new_data")
+    edited = {"code:model.p.int": {"code:model.p.int": DataVersion("sum2")}}
+    changed = facts(upstream_groups={**UNCHANGED, **edited})
+    lenient = NodeStateConfig(require_fresh_data_from="all", lag_tolerance_s=10**9)
+    assert decide(changed, rec, lenient, NOW) == Decision(BUILD, "upstream_code_changed")

@@ -31,6 +31,10 @@ def entry(version, operation, metrics=None, ts=None):
         ("MERGE", {"numTargetRowsInserted": "0", "numTargetRowsUpdated": "3"}, True),
         ("DELETE", {"numDeletedRows": 2}, True),
         ("CREATE OR REPLACE TABLE AS SELECT", {"numOutputRows": "10"}, True),
+        # a replace that writes 0 rows empties the table (seen on a workspace)
+        ("CREATE OR REPLACE TABLE AS SELECT", {"numOutputRows": "0", "numRemovedFiles": "5"}, True),
+        ("WRITE", {"numOutputRows": "0", "numRemovedFiles": "3"}, True),
+        ("REPLACE TABLE AS SELECT", {"numOutputRows": "0", "numRemovedFiles": "0"}, False),
         ("CREATE TABLE", {}, True),
         ("SOME NEW OPERATION", {}, True),
         ("WRITE", {"numOutputRows": "many"}, True),

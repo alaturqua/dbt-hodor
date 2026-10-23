@@ -43,8 +43,10 @@ NON_DATA_OPERATIONS = frozenset(
         "FSCK",
     }
 )
-ROW_METRICS = (
+CHANGE_METRICS = (
     "numOutputRows",
+    # a replace or overwrite that writes 0 rows still removes the old files
+    "numRemovedFiles",
     "numTargetRowsInserted",
     "numTargetRowsUpdated",
     "numTargetRowsDeleted",
@@ -101,7 +103,7 @@ def is_data_change(entry: HistoryEntry) -> bool:
     """Unknown operations and unreadable metrics count as changes: extra builds, no wrong reuse."""
     if entry.operation.upper() in NON_DATA_OPERATIONS:
         return False
-    present = [entry.metrics[key] for key in ROW_METRICS if key in entry.metrics]
+    present = [entry.metrics[key] for key in CHANGE_METRICS if key in entry.metrics]
     if not present:
         return True
     for value in present:

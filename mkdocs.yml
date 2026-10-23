@@ -100,6 +100,8 @@ nav:
       - Configuration: configuration.md
       - State stores: stores.md
       - Operations: operations.md
+      - Slim CI: slim-ci.md
+      - Upgrading: upgrading.md
   - Interactive guide: guide/index.html
   - Reference:
       - Design spec: design.md

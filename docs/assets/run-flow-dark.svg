@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 372" width="980" height="372" role="img" aria-labelledby="t d" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif">
+<title id="t">hodor run flow</title><desc id="d">dbt starts and hodor loads. With mode off or another command, dbt runs as usual. Otherwise hodor opens the store and reads the clock and data versions once, then runs the rules for each node: reuse returns dbt&#x27;s Reused result, a build runs dbt. Every node queues a record; records are written every 200 and at the end, and a summary line is printed.</desc>
+<defs>
+<marker id="m-line" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#7d8595"/></marker>
+<marker id="m-build" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f07a7d"/></marker>
+<marker id="m-reuse" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4fd1c5"/></marker>
+</defs>
+<rect width="980" height="372" rx="10" fill="#141922"/>
+<rect x="20" y="50" width="140" height="52" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5"/>
+<text x="90.0" y="72.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">dbt starts,</text>
+<text x="90.0" y="88.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">hodor loads</text>
+<rect x="180" y="50" width="140" height="52" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5"/>
+<text x="250.0" y="72.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">open the store,</text>
+<text x="250.0" y="88.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">load build records</text>
+<rect x="340" y="50" width="140" height="52" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5"/>
+<text x="410.0" y="72.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">read the clock,</text>
+<text x="410.0" y="88.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">the data versions</text>
+<rect x="500" y="50" width="140" height="52" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5"/>
+<text x="570.0" y="72.5" font-size="13" font-weight="700" fill="#e7eaf0" text-anchor="middle">each node:</text>
+<text x="570.0" y="88.5" font-size="13" font-weight="700" fill="#e7eaf0" text-anchor="middle">run the rules</text>
+<rect x="660" y="50" width="140" height="52" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5"/>
+<text x="730.0" y="72.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">write the</text>
+<text x="730.0" y="88.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">queued records</text>
+<rect x="820" y="50" width="140" height="52" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5"/>
+<text x="890.0" y="72.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">print the</text>
+<text x="890.0" y="88.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">summary line</text>
+<path d="M160 76.0L178 76.0" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<path d="M320 76.0L338 76.0" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<path d="M480 76.0L498 76.0" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<path d="M800 76.0L818 76.0" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<text x="250" y="36" font-size="11" font-weight="700" fill="#a9b0bd" text-anchor="middle">once per run</text>
+<text x="570" y="36" font-size="11" font-weight="700" fill="#a9b0bd" text-anchor="middle">for each node</text>
+<text x="890" y="36" font-size="11" font-weight="700" fill="#a9b0bd" text-anchor="middle">end of the run</text>
+<path d="M90 102L90 216" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<text x="100" y="146" font-size="11" font-weight="400" fill="#a9b0bd" text-anchor="start">mode off, or a command other than</text>
+<text x="100" y="160" font-size="11" font-weight="400" fill="#a9b0bd" text-anchor="start">run, build, test, seed, snapshot</text>
+<rect x="30" y="218" width="120" height="34" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="90.0" y="239.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">plain dbt</text>
+<path d="M570 102L570 118L380 118L380 247" fill="none" stroke="#7d8595" stroke-width="1.6"/>
+<path d="M380 165L398 165" fill="none" stroke="#4fd1c5" stroke-width="1.6" marker-end="url(#m-reuse)"/>
+<rect x="400" y="140" width="210" height="50" rx="6" fill="#1c222d" stroke="#4fd1c5" stroke-width="1.5"/>
+<text x="505.0" y="161.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">reuse (mode on): Reused,</text>
+<text x="505.0" y="177.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">or a test replays its result</text>
+<path d="M610 165L635 165L635 219L658 219" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<path d="M380 247L398 247" fill="none" stroke="#f07a7d" stroke-width="1.6" marker-end="url(#m-build)"/>
+<rect x="400" y="222" width="210" height="50" rx="6" fill="#1c222d" stroke="#f07a7d" stroke-width="1.5"/>
+<text x="505.0" y="243.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">build, or shadow mode:</text>
+<text x="505.0" y="259.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">dbt runs, read data version</text>
+<path d="M610 247L635 247L635 219L658 219" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<rect x="660" y="194" width="140" height="50" rx="6" fill="#1c222d" stroke="#343b48" stroke-width="1.5"/>
+<text x="730.0" y="215.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">queue a record</text>
+<text x="730.0" y="231.5" font-size="13" font-weight="400" fill="#e7eaf0" text-anchor="middle">for the node</text>
+<path d="M730 194L730 104" fill="none" stroke="#7d8595" stroke-width="1.6" marker-end="url(#m-line)"/>
+<text x="740" y="140" font-size="11" font-weight="400" fill="#a9b0bd" text-anchor="start">every 200 records,</text>
+<text x="740" y="154" font-size="11" font-weight="400" fill="#a9b0bd" text-anchor="start">and at the end</text>
+<text x="20" y="350" font-size="12" font-weight="400" fill="#a9b0bd" text-anchor="start">Any error in hodor for a node: a warning, and the node builds as plain dbt would (hodor_error).</text>
+</svg>

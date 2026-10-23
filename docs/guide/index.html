@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dbt-hodor: Hold Old Data, Or Rebuild</title>
 <link rel="icon" href="data:,">
-<script>(function(){var t=null;try{t=localStorage.getItem("hodor-theme")}catch(e){}if(t!=="light"&&t!=="dark")t=window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t)})()</script>
+<script>(function(){var p=null;try{p=JSON.parse(localStorage.getItem(new URL("../",location).pathname+".__palette"))}catch(e){}var i=p&&p.index,t=i===1?"light":i===2?"dark":matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t)})()</script>
 <meta name="description" content="An interactive guide to dbt-hodor, a free, self-hosted dbt plugin that reuses unchanged nodes and rebuilds only when code or upstream data changed.">
 <style>
 /* Cinzel (SIL OFL 1.1) is served from the site, see ../assets/fonts/cinzel/OFL.txt. The serif fallback keeps the page fine when it is opened on its own. */
@@ -73,7 +73,7 @@ header :focus-visible { outline-color:var(--hfocus); }
 nav.steps { background:var(--bar); border-bottom:1px solid var(--line); }
 [role="tablist"] { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:2px; padding:4px 0 0; }
 [role="tab"] { font:inherit; font-size:.88rem; line-height:1.25; min-width:0; background:none; color:var(--dim); border:0; border-bottom:3px solid transparent; border-radius:6px 6px 0 0; padding:6px 4px; cursor:pointer; display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px; overflow-wrap:anywhere; }
-@media (min-width: 1100px) { [role="tablist"] { grid-template-columns:repeat(9,minmax(0,1fr)); } [role="tab"] { flex-direction:row; justify-content:center; text-align:left; gap:8px; font-size:.88rem; padding:6px 6px; } }
+@media (min-width: 1100px) { [role="tablist"] { grid-template-columns:repeat(10,minmax(0,1fr)); } [role="tab"] { flex-direction:row; justify-content:center; text-align:left; gap:8px; font-size:.88rem; padding:6px 6px; } }
 @media (max-width: 420px) { [role="tablist"] { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width: 360px) { [role="tab"] { font-size:.78rem; padding:6px 2px; } }
 [role="tab"] .n { display:inline-grid; place-items:center; flex:none; width:22px; height:22px; border-radius:50%; border:1px solid var(--line2); font-size:.78rem; }
@@ -82,7 +82,7 @@ nav.steps { background:var(--bar); border-bottom:1px solid var(--line); }
 [role="tab"][aria-selected="true"] .n { background:var(--btnbg); color:var(--btntx); border-color:var(--btnbg); }
 nav .track { height:3px; background:var(--panel2); }
 /* scaled, not resized: animating width would lay out the page on every step */
-nav .fill { height:100%; background:var(--acc); width:100%; transform:scaleX(.111); transform-origin:left; transition:transform .35s ease; }
+nav .fill { height:100%; background:var(--acc); width:100%; transform:scaleX(.1); transform-origin:left; transition:transform .35s ease; }
 
 /* panels */
 main.wrap { padding:32px 20px 8px; }
@@ -241,6 +241,10 @@ ul.log li.fresh { animation: slidein .4s; }
 .dg .sg.s-ghost rect.box { fill:var(--amberbg); stroke:var(--tealg); stroke-dasharray:4 3; stroke-width:2.5; }
 .dg .sg.s-err rect.box { fill:var(--redbg); stroke:var(--red); stroke-width:3; }
 .dg .tagtx { fill:var(--amber); font-size:10.5px; font-weight:700; }
+.dg .lane { fill:var(--panel); stroke:var(--line); }
+.dg .lanet { font-size:11px; font-weight:700; }
+.dg .lanes { fill:var(--dim); font-size:10px; }
+.dg .sg.s-off rect.box { fill:none; stroke-dasharray:4 3; }
 .legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:.82rem; color:var(--dim); margin-top:10px; }
 
 footer { border-top:1px solid var(--line); margin-top:40px; padding:20px 0 32px; color:var(--dim); font-size:.88rem; }
@@ -261,7 +265,17 @@ details.more summary { cursor:pointer; font-weight:600; font-size:.9rem; padding
 .bullets li { margin:.3em 0; }
 .simdesc { margin:6px 0 10px; }
 svg.door { width:100%; max-height:250px; }
-.legend span { white-space:nowrap; }
+.legend span { white-space:nowrap; display:inline-flex; align-items:center; gap:6px; }
+/* swatches copy the node styles of the diagrams */
+.legend i { flex:none; width:22px; height:14px; border-radius:3px; border:2px solid var(--line2); background:var(--panel2); }
+.legend .k-run { border-color:var(--amberg); border-style:dashed; }
+.legend .k-reuse, .legend .k-own { background:var(--tealbg); border-color:var(--tealg); }
+.legend .k-build { background:var(--amberbg); border-color:var(--amberg); }
+.legend .k-ghost { background:var(--amberbg); border-color:var(--tealg); border-style:dashed; }
+.legend .k-err { background:var(--redbg); border-color:var(--red); }
+.legend .k-off { background:none; border-style:dashed; }
+.legend .k-via { border-color:var(--tealg); border-style:dashed; }
+.legend .k-defer { height:0; border:0; border-radius:0; border-top:2px dashed var(--acc); background:none; }
 .toc { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
 .toc .btn { min-height:32px; padding:2px 10px; font-size:.85rem; }
 .docbody { max-width:960px; }
@@ -345,9 +359,9 @@ svg.door { width:100%; max-height:250px; }
   footer { flex:none; margin:0; padding:4px 0 6px; font-size:.7rem; line-height:1.35; }
   footer p { margin:0; }
   /* docs: the page does not scroll, the docs pane does */
-  #p9:not([hidden]) .docs { flex:1; min-height:0; display:grid; grid-template-columns:150px minmax(0,1fr); gap:16px; }
-  #p9 .toc { flex-direction:column; flex-wrap:nowrap; align-content:start; margin:0; overflow:auto; }
-  #p9 .toc .btn { text-align:left; }
+  #p10:not([hidden]) .docs { flex:1; min-height:0; display:grid; grid-template-columns:150px minmax(0,1fr); gap:16px; }
+  #p10 .toc { flex-direction:column; flex-wrap:nowrap; align-content:start; margin:0; overflow:auto; }
+  #p10 .toc .btn { text-align:left; }
   .docbody { overflow:auto; max-width:none; padding-right:12px; }
   .docbody h2 { margin-bottom:.4em; }
 }
@@ -394,10 +408,11 @@ svg.door { width:100%; max-height:250px; }
       <button role="tab" id="tab-6" aria-controls="p6"><span class="n">6</span>Data versions</button>
       <button role="tab" id="tab-7" aria-controls="p7"><span class="n">7</span>Lineage</button>
       <button role="tab" id="tab-8" aria-controls="p8"><span class="n">8</span>Modes and safety</button>
-      <button role="tab" id="tab-9" aria-controls="p9"><span class="n">9</span>Docs</button>
+      <button role="tab" id="tab-9" aria-controls="p9"><span class="n">9</span>Slim CI</button>
+      <button role="tab" id="tab-10" aria-controls="p10"><span class="n">10</span>Docs</button>
     </div>
   </div>
-  <div class="track" role="progressbar" aria-label="Guide progress" aria-valuemin="1" aria-valuemax="9" aria-valuenow="1" id="prog"><div class="fill" id="progfill"></div></div>
+  <div class="track" role="progressbar" aria-label="Guide progress" aria-valuemin="1" aria-valuemax="10" aria-valuenow="1" id="prog"><div class="fill" id="progfill"></div></div>
 </nav>
 
 <main id="main" class="wrap" tabindex="-1">
@@ -529,7 +544,7 @@ svg.door { width:100%; max-height:250px; }
     <div class="col">
       <div class="card dg">
         <svg id="simdag" viewBox="0 0 360 252" aria-hidden="true" focusable="false"></svg>
-        <div class="legend"><span>Dashed amber: running</span><span>Teal: reused or replayed</span><span>Amber: built or ran</span><span>Dashed teal: could reuse (shadow)</span><span>Red: fail-open error</span></div>
+        <div class="legend"><span><i class="k-run" aria-hidden="true"></i>running</span><span><i class="k-reuse" aria-hidden="true"></i>reused or replayed</span><span><i class="k-build" aria-hidden="true"></i>built or ran</span><span><i class="k-ghost" aria-hidden="true"></i>could reuse (shadow)</span><span><i class="k-err" aria-hidden="true"></i>fail-open error</span></div>
       </div>
       <details class="more"><summary>How the numbers are simulated</summary>
         <p class="small">Queries: hodor reads the state once, runs one DESCRIBE HISTORY per upstream table (2 here), one refresh read per built table and one insert per 500 records. A built model counts 2 queries, a built test 1, a reused node 0. Wall clock: built nodes take fixed example times (views 1.2 s, tables 4.8 to 6.5 s, tests 2.4 s), a reused node 0.01 s, plus 1.1 s for hodor at the start and 0.4 s for the insert. Compute: 4 compute-seconds per second of a built node, 0.5 per hodor query. The comparison column is the same run with every node built and no hodor.</p>
@@ -590,12 +605,13 @@ svg.door { width:100%; max-height:250px; }
     <div class="col">
       <div class="card fill">
         <h3>Delta table history</h3>
-        <p>The token is the version and the commit time of the latest commit that changed data, so a recreated table whose versions restart still counts as changed. Maintenance commits never count. Other commits count, unless all their row metrics are 0.</p>
+        <p>The token is the version and the commit time of the latest commit that changed data, so a recreated table whose versions restart still counts as changed. Maintenance commits never count. Other commits count, unless all their change metrics are 0.</p>
         <div class="row">
           <button class="btn primary" id="scan" type="button">Find the token</button>
           <button class="btn" data-add="OPTIMIZE" type="button">+ OPTIMIZE</button>
           <button class="btn" data-add="INSERT" type="button">+ INSERT 50 rows</button>
           <button class="btn" data-add="MERGE0" type="button">+ MERGE, 0 rows</button>
+          <button class="btn" data-add="REPLACE0" type="button">+ REPLACE, 0 rows</button>
           <button class="btn" data-add="PROPS" type="button">+ SET TBLPROPERTIES</button>
         </div>
         <ul class="log" id="log" aria-label="Delta commit log, newest first" tabindex="0"></ul>
@@ -607,8 +623,8 @@ svg.door { width:100%; max-height:250px; }
       <div class="card">
         <h3>Maintenance operations that never count</h3>
         <p><code>OPTIMIZE</code>, <code>VACUUM START</code>, <code>VACUUM END</code>, <code>ANALYZE</code>, <code>COMPUTE STATS</code>, <code>SET TBLPROPERTIES</code>, <code>UNSET TBLPROPERTIES</code>, <code>CHANGE COLUMN</code>, <code>ADD CONSTRAINT</code>, <code>DROP CONSTRAINT</code>, <code>UPGRADE PROTOCOL</code>, <code>SET TAGS</code>, <code>UNSET TAGS</code>, <code>CLUSTER BY</code>, <code>REORG</code>, <code>FSCK</code>.</p>
-        <details class="more"><summary>Row metrics and the commit window</summary>
-          <p class="small">Row metrics that decide the zero-row case: <code>numOutputRows</code>, <code>numTargetRowsInserted</code>, <code>numTargetRowsUpdated</code>, <code>numTargetRowsDeleted</code>, <code>numDeletedRows</code>, <code>numUpdatedRows</code>, <code>numCopiedRows</code>. A commit with none of them counts as a change.</p>
+        <details class="more"><summary>Change metrics and the commit window</summary>
+          <p class="small">Change metrics that decide the zero-row case: <code>numOutputRows</code>, <code>numRemovedFiles</code>, <code>numTargetRowsInserted</code>, <code>numTargetRowsUpdated</code>, <code>numTargetRowsDeleted</code>, <code>numDeletedRows</code>, <code>numUpdatedRows</code>, <code>numCopiedRows</code>. A commit with none of them counts as a change. A replace that writes 0 rows still removes the old files, so it counts: the table is now empty.</p>
           <p class="small">Only the newest 20 commits are read (<code>DESCRIBE HISTORY ... LIMIT 20</code>). If none of them changed data, the version is unknown and dependents build. An unknown operation name counts as a change: that can cause an extra build, never a wrong reuse.</p>
         </details>
       </div>
@@ -638,7 +654,7 @@ svg.door { width:100%; max-height:250px; }
     <div class="col">
       <div class="card dg">
         <svg id="dag" viewBox="0 0 720 196" role="group" aria-label="Example lineage graph"></svg>
-        <div class="legend"><span>Dashed outline: looked through.</span><span>Teal: its own version is used.</span><span>Red: unknown.</span></div>
+        <div class="legend"><span><i class="k-via" aria-hidden="true"></i>looked through</span><span><i class="k-own" aria-hidden="true"></i>its own version is used</span><span><i class="k-err" aria-hidden="true"></i>unknown</span></div>
       </div>
       <div class="scen" id="dagpick" role="group" aria-label="Pick a node"></div>
       <div class="result" id="dagres" aria-live="polite"></div>
@@ -705,8 +721,38 @@ svg.door { width:100%; max-height:250px; }
   </div>
 </section>
 
-<!-- 8 DOCS -->
+<!-- 9 SLIM CI -->
 <section role="tabpanel" id="p9" aria-labelledby="tab-9" hidden>
+  <div class="ph">
+    <h2>Slim CI</h2>
+    <p class="lead">A pull request builds its changes into its own schema and reads the rest from a base target with <code>--defer --state</code>. The base target is what the pull request is compared with: the main catalog of the same environment, or prod. Pick a scenario to see what hodor does on each push and on the deploy. The lines are simulated, not recorded.</p>
+  </div>
+  <div class="scen" id="ciscen" role="group" aria-label="Slim CI scenario"></div>
+  <p id="cidesc" class="simdesc" aria-live="polite"></p>
+  <div class="stage w4">
+    <div class="col">
+      <div class="card dg">
+        <svg id="cidag" viewBox="0 0 440 272" aria-hidden="true" focusable="false"></svg>
+        <div class="legend"><span><i class="k-run" aria-hidden="true"></i>running</span><span><i class="k-reuse" aria-hidden="true"></i>reused or replayed</span><span><i class="k-build" aria-hidden="true"></i>built or ran</span><span><i class="k-ghost" aria-hidden="true"></i>could reuse (shadow)</span><span><i class="k-off" aria-hidden="true"></i>not in this environment</span><span><i class="k-defer" aria-hidden="true"></i>read through defer</span></div>
+      </div>
+      <details class="more"><summary>The setup behind the scenarios</summary>
+        <p class="small">The base target builds into <code>analytics.sales</code>; the CI target builds into <code>analytics_ci.&lt;ci_schema&gt;</code> through a <code>generate_schema_name</code> macro. The name of that schema can follow any scheme, for example <code>pr_42_sales</code> or <code>mr_17_sales</code>; hodor does not parse it. The PR edits <code>fct_orders</code> and adds <code>rpt_orders</code>. The CI job runs <code>dbt build -s state:modified+ dim_parity --defer --state base-state</code>; <code>dim_parity</code> is selected by name, though the PR does not change it. <code>stg_orders</code> is not selected, so dbt reads the base table through defer. See <a href="../slim-ci/">Slim CI</a> in the docs.</p>
+      </details>
+    </div>
+    <div class="col">
+      <div class="ctl ctrl">
+        <button class="btn" id="cirestart" type="button">&#8634; Restart</button>
+        <button class="btn primary" id="ciplay" type="button">&#9654; Play</button>
+        <button class="btn" id="cistep" type="button">Step &#9654;</button>
+        <span class="prog2" id="ciprog" aria-live="polite"></span>
+      </div>
+      <div class="term" id="citerm" role="log" tabindex="0" aria-label="Simulated dbt log for slim CI"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 DOCS -->
+<section role="tabpanel" id="p10" aria-labelledby="tab-10" hidden>
   <div class="docs">
     <div class="toc" role="group" aria-label="Docs sections">
       <button class="btn" type="button" data-to="d-what">What it is</button>
@@ -716,6 +762,7 @@ svg.door { width:100%; max-height:250px; }
       <button class="btn" type="button" data-to="d-store">State store</button>
       <button class="btn" type="button" data-to="d-reasons">Reason codes</button>
       <button class="btn" type="button" data-to="d-cli">CLI</button>
+      <button class="btn" type="button" data-to="d-ci">Slim CI</button>
       <button class="btn" type="button" data-to="d-scope">Scope of v1</button>
       <button class="btn" type="button" data-to="d-limit">Known limit</button>
     </div>
@@ -810,10 +857,13 @@ Run again with --yes to delete them.</code></pre>
 7 of 8 PASS not_null_fct_orders_id ......... [PASS (replayed) in 0.02s]</code></pre>
   <p>The last line of a run: <code>dbt-hodor: N reused, M built, K fail-open errors</code>. In shadow mode: <code>dbt-hodor: N could be reused, M need a build (shadow: all built), K fail-open errors</code>.</p>
 
+  <h3 id="d-ci">Slim CI</h3>
+  <p>hodor works with <code>-s state:modified+ --defer --state &lt;prod manifest&gt;</code>, with or without <code>--favor-state</code>. Catalog and schema names of the project's own nodes are replaced by the node's id before hashing, so a CI catalog or a schema per pull request, under any naming scheme, is not a code change. Each push reuses what the last push built. A table made by <code>dbt clone</code> has no hodor record, so it builds once, then is reused. A deploy compares only with the target's own history. Try it in the Slim CI tab.</p>
+
   <h3 id="d-scope">Scope of v1</h3>
   <p>Commands: <code>run</code>, <code>build</code>, <code>test</code>, <code>seed</code> and <code>snapshot</code>.</p>
   <p>Supported: models materialized as <code>table</code>, <code>incremental</code> and <code>view</code>, plus seeds, snapshots and data tests. Incremental strategies: <code>append</code>, <code>merge</code>, <code>delete+insert</code>, <code>insert_overwrite</code> and <code>replace_where</code>; an unset strategy counts as <code>merge</code>.</p>
-  <p>Built as plain dbt: clones, deferral, Python models, microbatch, materialized views, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.</p>
+  <p>Built as plain dbt: Python models, microbatch, materialized views, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.</p>
   <p>A seed is reused when the CSV content (sha256 of the file, line endings normalized) and its config are unchanged and its table was not written outside dbt. A snapshot follows the table rules: code, config and upstream data unchanged, and its target not written outside dbt. <code>lag_tolerance</code> applies to snapshots too.</p>
 
   <h3 id="d-limit">Known limit</h3>
@@ -824,7 +874,7 @@ Run again with --yes to delete them.</code></pre>
 
 <nav class="pager" aria-label="Switch tab">
   <button class="btn" id="prev" type="button">&larr; Previous</button>
-  <span class="small"><span id="progtxt" aria-live="polite">Step 1 of 9</span> &middot; switch tab with <kbd>&larr;</kbd> <kbd>&rarr;</kbd></span>
+  <span class="small"><span id="progtxt" aria-live="polite">Step 1 of 10</span> &middot; switch tab with <kbd>&larr;</kbd> <kbd>&rarr;</kbd></span>
   <button class="btn" id="next" type="button">Next &rarr;</button>
 </nav>
 </main>
@@ -898,13 +948,21 @@ Run again with --yes to delete them.</code></pre>
   }
 
   /* ---------- theme ---------- */
-  // three states like the MkDocs palette toggle: system preference, light, dark
+  // the docs' palette toggle: system preference, light, dark. MkDocs Material keeps the choice
+  // in localStorage under the site's path, so the guide and the docs share it.
   var themeBtn = $('#theme'), mq = window.matchMedia('(prefers-color-scheme: light)'), themePref = 'auto';
   var THEME = {
     auto: { icon: 'M14.3,16L13.6,14H10.4L9.7,16H7.8L11,7H13L16.2,16H14.3M20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31L23.31,12L20,8.69M10.85,12.65H13.15L12,9L10.85,12.65Z', label: 'Switch to light mode', next: 'light' },
     light: { icon: 'M12,8A4,4 0 0,0 8,12A4,4 0 0,0 12,16A4,4 0 0,0 16,12A4,4 0 0,0 12,8M12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6A6,6 0 0,1 18,12A6,6 0 0,1 12,18M20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31L23.31,12L20,8.69Z', label: 'Switch to dark mode', next: 'dark' },
     dark: { icon: 'M12,18C11.11,18 10.26,17.8 9.5,17.45C11.56,16.5 13,14.42 13,12C13,9.58 11.56,7.5 9.5,6.55C10.26,6.2 11.11,6 12,6A6,6 0 0,1 18,12A6,6 0 0,1 12,18M20,8.69V4H15.31L12,0.69L8.69,4H4V8.69L0.69,12L4,15.31V20H8.69L12,23.31L15.31,20H20V15.31L23.31,12L20,8.69Z', label: 'Switch to system preference', next: 'auto' }
   };
+  var PALETTE = new URL('../', location).pathname + '.__palette', PREFS = ['auto', 'light', 'dark'];
+  var MEDIA = ['(prefers-color-scheme)', '(prefers-color-scheme: light)', '(prefers-color-scheme: dark)'];
+  function savedTheme() {
+    var p = null;
+    try { p = JSON.parse(localStorage.getItem(PALETTE)); } catch (e) { p = null; }
+    return PREFS[p && p.index] || 'auto';
+  }
   function setTheme(pref, persist) {
     themePref = pref;
     var t = pref === 'auto' ? (mq.matches ? 'light' : 'dark') : pref;
@@ -913,19 +971,19 @@ Run again with --yes to delete them.</code></pre>
     themeBtn.title = THEME[pref].label;
     themeBtn.setAttribute('aria-label', THEME[pref].label);
     if (!persist) return;
+    var i = PREFS.indexOf(pref);
     try {
-      if (pref === 'auto') localStorage.removeItem('hodor-theme');
-      else localStorage.setItem('hodor-theme', pref);
+      localStorage.setItem(PALETTE, JSON.stringify({ index: i, color: {
+        media: MEDIA[i], scheme: t === 'light' ? 'default' : 'slate', primary: 'custom', accent: 'custom' } }));
     } catch (e) { /* storage may be blocked */ }
   }
-  var saved = null;
-  try { saved = localStorage.getItem('hodor-theme'); } catch (e) { saved = null; }
-  // the head script already set data-theme; a saved choice wins over the system setting
-  setTheme(saved === 'light' || saved === 'dark' ? saved : 'auto', false);
+  setTheme(savedTheme(), false);
   themeBtn.addEventListener('click', function () { setTheme(THEME[themePref].next, true); });
   if (mq.addEventListener) mq.addEventListener('change', function () {
     if (themePref === 'auto') setTheme('auto', false);
   });
+  // a docs tab changed the palette
+  window.addEventListener('storage', function (e) { if (e.key === PALETTE) setTheme(savedTheme(), false); });
 
   /* ---------- tabs ---------- */
   var tabs = $$('[role=tab]'), panels = $$('[role=tabpanel]'), N = tabs.length, cur = 0;
@@ -1369,10 +1427,11 @@ Run again with --yes to delete them.</code></pre>
     { n: 9, r: 'select_star_view', c: 'a view whose final SELECT * reads directly from a ref() or source()', d: 'build' },
     { n: 10, r: 'view_unchanged', c: 'the node is a view and its definition is unchanged', d: 'reuse' },
     { n: 11, r: 'unknown_upstream', c: 'any upstream table has an unknown data version', d: 'build' },
-    { n: 12, r: 'no_new_data', c: 'no upstream changed since the last build (any), or not all of them changed (all)', d: 'reuse' },
-    { n: 13, r: 'within_lag_tolerance', c: 'upstream changed, but the last build is younger than lag_tolerance (default 45m; tests 0)', d: 'reuse' },
-    { n: 14, r: 'new_upstream_data', c: 'otherwise (volatile_sql when only volatile values such as the date changed)', d: 'build' },
-    { n: 15, r: 'hodor_error', c: 'an exception anywhere in hodor for this node (fail open)', d: 'build' }
+    { n: 12, r: 'upstream_code_changed', c: 'a view between this node and its upstream tables has other code than at the last build', d: 'build' },
+    { n: 13, r: 'no_new_data', c: 'no upstream changed since the last build (any), or not all of them changed (all)', d: 'reuse' },
+    { n: 14, r: 'within_lag_tolerance', c: 'upstream changed, but the last build is younger than lag_tolerance (default 45m; tests 0)', d: 'reuse' },
+    { n: 15, r: 'new_upstream_data', c: 'otherwise (volatile_sql when only volatile values such as the date changed)', d: 'build' },
+    { n: 16, r: 'hodor_error', c: 'an exception anywhere in hodor for this node (fail open)', d: 'build' }
   ];
   var SCEN = [
     ['Nothing changed', 'no_new_data', 'Same code, same config, the table was not touched, and no upstream has new data.'],
@@ -1381,6 +1440,7 @@ Run again with --yes to delete them.</code></pre>
     ['New day, date window', 'new_upstream_data', 'The model filters on current_date() - 7. No upstream has new rows, but the date changed since the last build, so the window moved.', 'volatile_sql'],
     ['Stamp column only', 'no_new_data', 'The only volatile function is a stamp: current_timestamp() as _loaded_at in the final SELECT. It decides no rows or values, so the node is reused and keeps the stamp of its last build.'],
     ['Upstream recreated', 'new_upstream_data', 'The upstream table was dropped and recreated, so its Delta version restarted at a number seen before. The token also holds the commit time, so it still counts as new data.'],
+    ['Upstream rebuilt empty', 'new_upstream_data', 'The upstream table was rebuilt with CREATE OR REPLACE and the query returned no rows. The commit shows numOutputRows 0, but numRemovedFiles is above 0: the old rows are gone, so it counts as new data.'],
     ['Code changed', 'code_changed', 'The normalized compiled SQL differs from the last build.'],
     ['Config changed', 'config_changed', 'A config that changes the data (for example the materialization or a column type) differs.'],
     ['Constraint or mask changed', 'config_changed', 'A model-level primary key, a column mask, a row filter or a column type changed in YAML. The SQL is the same, but the config hash differs.'],
@@ -1388,6 +1448,7 @@ Run again with --yes to delete them.</code></pre>
     ['OPTIMIZE ran', 'no_new_data', 'OPTIMIZE is a maintenance commit. It does not change the data version of an upstream table or of the node itself, so nothing triggers a build.'],
     ['Someone wrote to the table', 'target_modified', 'The node\'s own table has a data-change commit that this node did not make. Its data may differ from what hodor recorded.'],
     ['A view', 'view_unchanged', 'A view stores no data and always shows current upstream data. Only a definition change rebuilds it.'],
+    ['A view in between changed', 'upstream_code_changed', 'The table reads through a view, and the SQL of that view changed. Its upstream tables have no new data, but the rows the table reads are different now, so it builds.'],
     ['A view with SELECT *', 'select_star_view', 'The columns of the upstream table can change without any change in the view code, so the view is rebuilt.'],
     ['read_files input', 'unknown_upstream', 'read_files(...) and other table functions have no data version. hodor cannot tell if the input changed, so the node builds.'],
     ['--full-refresh', 'full_refresh', 'A full refresh always builds.'],
@@ -1396,7 +1457,7 @@ Run again with --yes to delete them.</code></pre>
     ['Seed unchanged', 'no_new_data', 'The CSV content (sha256, line endings normalized) and the config are the same, and the seed table was not written outside dbt. The seed is reused.'],
     ['Seed CSV edited', 'code_changed', 'The CSV content differs from the last build, so the seed loads again.'],
     ['Snapshot, nothing changed', 'no_new_data', 'Code, config and upstream data are unchanged and the target was not written outside dbt. A snapshot follows the table rules, and lag_tolerance applies to it too.'],
-    ['Microbatch, Python, materialized view', 'unsupported', 'Out of scope: these are built as plain dbt, like clones, deferral, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.'],
+    ['Microbatch, Python, materialized view', 'unsupported', 'Out of scope: these are built as plain dbt, like streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.'],
     ['Error in hodor', 'hodor_error', 'Any exception while deciding is logged as a warning. The node builds as plain dbt would.']
   ];
   var ladder = $('#ladder'), scenBox = $('#scen'), result = $('#result'), lt = [], scenIdx = -1, ltimers = [];
@@ -1406,7 +1467,7 @@ Run again with --yes to delete them.</code></pre>
     hel('span', 'num', s, '1');
     var b = hel('div', '', s); b.innerHTML = '<code>shadow</code> <span class="chip build">build</span>';
     hel('span', 'st', s);
-    hel('div', 'cond', s, 'mode is shadow: build anyway, keep the decision from rules 2 to 14 in the record');
+    hel('div', 'cond', s, 'mode is shadow: build anyway, keep the decision from the other rules in the record');
     RULES.forEach(function (r) {
       var li = hel('li', '', ladder);
       hel('span', 'num', li, String(r.n));
@@ -1474,7 +1535,7 @@ Run again with --yes to delete them.</code></pre>
 
   /* ---------- tab 5: Delta log ---------- */
   var MAINT = ['OPTIMIZE','VACUUM START','VACUUM END','ANALYZE','COMPUTE STATS','SET TBLPROPERTIES','UNSET TBLPROPERTIES','CHANGE COLUMN','ADD CONSTRAINT','DROP CONSTRAINT','UPGRADE PROTOCOL','SET TAGS','UNSET TAGS','CLUSTER BY','REORG','FSCK'];
-  var ROWM = ['numOutputRows','numTargetRowsInserted','numTargetRowsUpdated','numTargetRowsDeleted','numDeletedRows','numUpdatedRows','numCopiedRows'];
+  var ROWM = ['numOutputRows','numRemovedFiles','numTargetRowsInserted','numTargetRowsUpdated','numTargetRowsDeleted','numDeletedRows','numUpdatedRows','numCopiedRows'];
   function kind(c) {
     if (MAINT.indexOf(c.op) >= 0) return 'maint';
     var keys = ROWM.filter(function (m) { return c.m[m] != null; });
@@ -1501,7 +1562,7 @@ Run again with --yes to delete them.</code></pre>
     for (var i = w.length - 1; i >= 0; i--) if (kind(w[i]) === 'data') return w[i].v;
     return null;
   }
-  var WHY = { maint: 'maintenance, never counts', zero: 'all row metrics are 0, does not count', data: 'changed data: counts' };
+  var WHY = { maint: 'maintenance, never counts', zero: 'all change metrics are 0, does not count', data: 'changed data: counts' };
   function renderLog(scanIdx, found, fresh) {
     var ul = $('#log'); ul.textContent = '';
     var w = windowed().slice().reverse();
@@ -1532,6 +1593,7 @@ Run again with --yes to delete them.</code></pre>
     var last = commits[commits.length - 1].v + 1, c;
     if (kindName === 'OPTIMIZE') c = { v: last, op: 'OPTIMIZE', m: {} };
     else if (kindName === 'INSERT') c = { v: last, op: 'WRITE', m: { numOutputRows: 50 } };
+    else if (kindName === 'REPLACE0') c = { v: last, op: 'CREATE OR REPLACE TABLE AS SELECT', m: { numOutputRows: 0, numRemovedFiles: 5 } };
     else if (kindName === 'MERGE0') c = { v: last, op: 'MERGE', m: { numTargetRowsInserted: 0, numTargetRowsUpdated: 0, numTargetRowsDeleted: 0 } };
     else c = { v: last, op: 'SET TBLPROPERTIES', m: {} };
     commits.push(c);
@@ -1653,6 +1715,170 @@ Run again with --yes to delete them.</code></pre>
   }
   var origShow = show;
   show = function (i) { origShow(i); if (i === 6) renderDag(); if (i === 7) renderNodes(); };
+
+  /* ---------- tab 9: slim CI ---------- */
+  var CINODES = [
+    { id: 'p_raw', t: 'raw_orders', s: 'source', x: 8, y: 26 },
+    { id: 'p_stg', t: 'stg_orders', s: 'table', x: 8, y: 86 },
+    { id: 'p_fct', t: 'fct_orders', s: 'table', x: 8, y: 166 },
+    { id: 'p_dim', t: 'dim_parity', s: 'table', x: 112, y: 166 },
+    { id: 'p_rpt', t: 'rpt_orders', s: 'table', x: 8, y: 226 },
+    { id: 'fct', t: 'fct_orders', s: 'table', x: 233, y: 86 },
+    { id: 'rpt', t: 'rpt_orders', s: 'table', x: 337, y: 86 },
+    { id: 't_fct', t: 'not_null', s: '', x: 233, y: 132, test: true },
+    { id: 'dim', t: 'dim_parity', s: 'table', x: 233, y: 166 },
+    { id: 't_dim', t: 'not_null', s: '', x: 233, y: 212, test: true }
+  ];
+  var CIW = {
+    fct: ['sql table model', 'fct_orders'], rpt: ['sql table model', 'rpt_orders'], dim: ['sql table model', 'dim_parity'],
+    t_fct: ['test', 'not_null_fct_orders_id'], t_dim: ['test', 'not_null_dim_parity_parity'],
+    p_stg: ['sql table model', 'stg_orders'], p_fct: ['sql table model', 'fct_orders'], p_dim: ['sql table model', 'dim_parity'], p_rpt: ['sql table model', 'rpt_orders']
+  };
+  var CIPUSH = ['fct', 't_fct', 'dim', 't_dim', 'rpt'];
+  // each step: [node, outcome, reason]; outcome: build, reuse, replay, run, shadow
+  function ciScn(name, desc, o) { o.name = name; o.desc = desc; return o; }
+  var CISIMS = [
+    ciScn('Push 1', 'The first CI run of the PR. fct_orders changed and builds; it reads the base stg_orders through defer. rpt_orders is new, so it has no history. dim_parity is unchanged, but the CI schema has no build of it yet, so it builds once.',
+      { rec: 0, hot: ['defer'], tags: { fct: 'SQL edited', rpt: 'added in the PR' },
+        steps: [['fct', 'build', 'code_changed'], ['t_fct', 'run'], ['dim', 'build', 'no_history'], ['t_dim', 'run'], ['rpt', 'build', 'no_history']] }),
+    ciScn('Push 2, same code', 'A new commit that changes only a README. The CI records of push 1 are this PR\'s history now: same code, same base data, so every node is reused and the tests replay.',
+      { rec: 5, hot: ['defer'], tags: { fct: 'SQL edited' },
+        steps: [['fct', 'reuse', 'no_new_data'], ['t_fct', 'replay'], ['dim', 'reuse', 'no_new_data'], ['t_dim', 'replay'], ['rpt', 'reuse', 'no_new_data']] }),
+    ciScn('Push 3, edit again', 'The PR edits fct_orders a second time. fct_orders builds, and rpt_orders builds because the table it reads changed. dim_parity reads neither, so it is reused.',
+      { rec: 10, hot: ['defer'], tags: { fct: 'SQL edited again' },
+        steps: [['fct', 'build', 'code_changed'], ['t_fct', 'run'], ['dim', 'reuse', 'no_new_data'], ['t_dim', 'replay'], ['rpt', 'build', 'new_upstream_data']] }),
+    ciScn('Base gets new data', 'New rows reached raw_orders and the base job rebuilt stg_orders. The PR reads the base stg_orders through defer, so on the next push its models build again.',
+      { rec: 15, hot: ['defer'], tags: { p_raw: 'new rows', p_stg: 'rebuilt in base', fct: 'SQL edited' },
+        steps: [['fct', 'build', 'new_upstream_data'], ['t_fct', 'run'], ['dim', 'build', 'new_upstream_data'], ['t_dim', 'run'], ['rpt', 'build', 'new_upstream_data']] }),
+    ciScn('After dbt clone', 'The CI job ran dbt clone before the build, so dim_parity is a copy of the base table. hodor has no record of that copy, so it builds dim_parity once. From the next push on it is reused.',
+      { rec: 0, hot: ['defer'], pre: '$ dbt clone --target ci -s dim_parity --state base-state', tags: { fct: 'SQL edited', rpt: 'added in the PR', dim: 'from dbt clone' },
+        steps: [['fct', 'build', 'code_changed'], ['t_fct', 'run'], ['dim', 'build', 'no_history'], ['t_dim', 'run'], ['rpt', 'build', 'no_history']] }),
+    ciScn('Shadow mode', 'The CI target is in shadow mode, on a push with the same code as push 1. hodor decides and records, but nothing is reused: every node builds and every test runs.',
+      { mode: 'shadow', rec: 5, hot: ['defer'], tags: { fct: 'SQL edited' },
+        steps: [['fct', 'shadow', 'no_new_data'], ['t_fct', 'run'], ['dim', 'shadow', 'no_new_data'], ['t_dim', 'run'], ['rpt', 'shadow', 'no_new_data']] }),
+    ciScn('Merge and deploy', 'The PR is merged and the base target runs dbt build. It compares only with its own records: the changed fct_orders builds, the added rpt_orders builds, the rest is reused. old_orders, deleted in the PR, is not selected; dbt leaves its table, and dbt-hodor prune removes its old records later.',
+      { target: 'prod', rec: 14, tags: { p_fct: 'changed in the PR', p_rpt: 'added' },
+        steps: [['p_stg', 'reuse', 'no_new_data'], ['p_fct', 'build', 'code_changed'], ['p_dim', 'reuse', 'no_new_data'], ['p_rpt', 'build', 'no_history']] })
+  ];
+  var ciSel = 0, ciEv = [], ciIdx = -1, ciTimer = null, ciBuilt = false;
+  function genCi(sc) {
+    var ev = [], st = {}, sec = 0, prod = sc.target === 'prod', shadow = sc.mode === 'shadow', n = sc.steps.length;
+    var schema = prod ? 'sales' : '<ci_schema>', c = { a: 0, b: 0 }, ok = 0, ru = 0;
+    function push(text, cls, node, s2, noTime) {
+      if (s2) st[node] = s2;
+      ev.push({ text: (noTime ? '' : stamp(sec)) + text, cls: cls, st: JSON.parse(JSON.stringify(st)) });
+    }
+    function line(pre, br) { return pre + ' ' + dots(pre) + ' [' + br + ']'; }
+    if (sc.pre) push(sc.pre, 'l-dim', null, null, true);
+    push(prod ? '$ dbt build --target base' : '$ dbt build --target ci -s state:modified+ dim_parity --defer --state base-state', 'l-dim', null, null, true);
+    push('dbt-hodor <installed version>: mode ' + (sc.mode || 'on') + ', ' + sc.rec + ' build records for shop/' + (prod ? 'base' : 'ci'), 'l-dim');
+    sec += 2;
+    sc.steps.forEach(function (stp, ix) {
+      var id = stp[0], how = stp[1], why = stp[2], w = CIW[id], test = w[0] === 'test', i = (ix + 1) + ' of ' + n;
+      var label = test ? 'test ' + w[1] : w[0] + ' ' + schema + '.' + w[1];
+      push(line(i + ' START ' + label, 'RUN'), 'l-dim', id, 's-run');
+      if (how === 'reuse') { c.a++; ru++; push(line(i + ' REUSED ' + label, 'REUSED (' + why + ') in 0.01s'), 'l-reuse', id, 's-reuse'); return; }
+      if (how === 'replay') { c.a++; ok++; push(line(i + ' PASS ' + w[1], 'PASS (replayed) in 0.02s'), 'l-reuse', id, 's-reuse'); return; }
+      sec++; ok++;
+      // the shadow scenario repeats push 2, so its tests could replay
+      if (how === 'run') { if (shadow) c.a++; else c.b++; push(line(i + ' PASS ' + w[1], 'PASS in 0.03s'), 'l-ok', id, shadow ? 's-ghost' : 's-build'); return; }
+      if (how === 'shadow') {
+        var could = why === 'no_new_data';
+        if (could) c.a++; else c.b++;
+        push(line(i + ' OK created ' + label, 'OK (' + (could ? 'shadow, could reuse: ' : '') + why + ') in 0.07s'), 'l-ok', id, could ? 's-ghost' : 's-build');
+        return;
+      }
+      c.b++;
+      push(line(i + ' OK created ' + label, 'OK (' + why + ') in 0.07s'), 'l-ok', id, 's-build');
+    });
+    sec++;
+    push(shadow
+      ? 'dbt-hodor: ' + c.a + ' could be reused, ' + c.b + ' need a build (shadow: all built), 0 fail-open errors'
+      : 'dbt-hodor: ' + c.a + ' reused, ' + c.b + ' built, 0 fail-open errors', 'l-sum');
+    push('Done. PASS=' + ok + ' WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=' + ru + ' TOTAL=' + n, 'l-dim');
+    return ev;
+  }
+  function buildCi() {
+    ciBuilt = true;
+    var svg = $('#cidag');
+    [[0, 'base', 'analytics.sales'], [224, 'CI, one PR', 'analytics_ci.<ci_schema>']].forEach(function (l) {
+      el('rect', { 'class': 'lane', x: l[0], y: 0, width: 216, height: 272, rx: 8 }, svg);
+      el('text', { 'class': 'lanet', x: l[0] + 8, y: 15 }, svg, l[1]);
+      el('text', { 'class': 'lanes', x: l[0] + 208, y: 15, 'text-anchor': 'end' }, svg, l[2]);
+    });
+    [['', 'M56 66L56 86'], ['', 'M56 126L56 166'], ['', 'M80 126L160 166'], ['', 'M56 206L56 226'], ['', 'M329 106L337 106'],
+     ['defer', 'M104 106L233 106']].forEach(function (e) {
+      el('path', { 'class': 'edge' + (e[0] ? ' x-' + e[0] : ''), d: e[1] }, svg);
+    });
+    el('text', { 'class': 'lanes', x: 168, y: 100, 'text-anchor': 'middle' }, svg, '--defer');
+    CINODES.forEach(function (nd) {
+      var w = 96, h = nd.test ? 20 : 40, g = el('g', { 'class': 'sg', 'data-n': nd.id }, svg);
+      el('rect', { 'class': 'box', x: nd.x, y: nd.y, width: w, height: h, rx: nd.test ? 5 : 8 }, g);
+      if (nd.test) el('text', { x: nd.x + w / 2, y: nd.y + 14, 'text-anchor': 'middle', 'font-size': 10 }, g, nd.t);
+      else {
+        el('text', { x: nd.x + w / 2, y: nd.y + 17, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700 }, g, nd.t);
+        el('text', { 'class': 'sub ci-' + nd.id, x: nd.x + w / 2, y: nd.y + 32, 'text-anchor': 'middle', 'font-size': 9.5 }, g, nd.s);
+      }
+    });
+    CISIMS.forEach(function (sc, i) {
+      var b = hel('button', 'btn', $('#ciscen'), sc.name); b.type = 'button'; b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', function () { ciPick(i, true); });
+    });
+  }
+  function ciPause() {
+    if (ciTimer) { clearTimeout(ciTimer); ciTimer = null; }
+    $('#ciplay').innerHTML = (ciEv.length && ciIdx >= ciEv.length - 1) ? '&#8635; Replay' : '&#9654; Play';
+  }
+  function ciRender() {
+    var term = $('#citerm'), sc = CISIMS[ciSel], prod = sc.target === 'prod', end = ciIdx >= ciEv.length - 1;
+    term.textContent = '';
+    for (var i = 0; i <= ciIdx; i++) hel('div', ciEv[i].cls + (i === ciIdx ? ' cur' : ''), term, ciEv[i].text);
+    term.scrollTop = term.scrollHeight;
+    $('#ciprog').textContent = 'Line ' + (ciIdx + 1) + ' of ' + ciEv.length + (end ? ', end of the run' : '');
+    $('#cistep').disabled = end;
+    $('#cirestart').disabled = ciIdx < 0;
+    var stt = ciIdx >= 0 ? ciEv[ciIdx].st : {};
+    $$('#cidag .sg').forEach(function (g) {
+      var id = g.getAttribute('data-n'), off = prod ? id.indexOf('p_') !== 0 : id === 'p_rpt';
+      g.setAttribute('class', 'sg' + (stt[id] ? ' ' + stt[id] : off ? ' s-off' : ''));
+    });
+    CINODES.forEach(function (nd) {
+      var t = $('#cidag .ci-' + nd.id); if (!t) return;
+      var tag = sc.tags[nd.id] || (!prod && nd.id === 'p_rpt' ? 'not in base yet' : '');
+      t.textContent = tag || nd.s;
+      t.setAttribute('class', 'sub ci-' + nd.id + (tag ? ' tagtx' : ''));
+    });
+    var started = ciIdx >= 0, hot = sc.hot || [];
+    $('#cidag .x-defer').setAttribute('class', 'edge x-defer' + (started && hot.indexOf('defer') >= 0 ? ' hot' : ''));
+  }
+  function ciTick() {
+    ciTimer = null;
+    if (ciIdx < ciEv.length - 1) { ciIdx++; ciRender(); }
+    if (ciIdx >= ciEv.length - 1) { ciPause(); return; }
+    ciTimer = setTimeout(ciTick, 500);
+  }
+  function ciPlay() {
+    if (ciIdx >= ciEv.length - 1) { ciIdx = -1; ciRender(); }
+    $('#ciplay').innerHTML = '&#9208; Pause';
+    ciTimer = setTimeout(ciTick, 150);
+  }
+  function ciPick(i, auto) {
+    ciPause();
+    ciSel = i; ciEv = genCi(CISIMS[i]); ciIdx = reduce ? ciEv.length - 1 : -1;
+    $$('#ciscen .btn').forEach(function (b, k) { b.setAttribute('aria-pressed', k === i ? 'true' : 'false'); });
+    $('#cidesc').textContent = CISIMS[i].desc;
+    ciRender();
+    if (auto && !reduce) ciPlay(); else ciPause();
+  }
+  $('#ciplay').addEventListener('click', function () { if (ciTimer) ciPause(); else ciPlay(); });
+  $('#cistep').addEventListener('click', function () { ciPause(); if (ciIdx < ciEv.length - 1) { ciIdx++; ciRender(); } ciPause(); });
+  $('#cirestart').addEventListener('click', function () { ciPause(); ciIdx = -1; ciRender(); ciPause(); });
+  var ciShow = show;
+  show = function (i) {
+    if (ciBuilt && i !== 8) ciPause();
+    ciShow(i);
+    if (i === 8 && !ciBuilt) { buildCi(); ciPick(0, !reduce); }
+  };
 
   /* ---------- tab 7 ---------- */
   var NODES = [

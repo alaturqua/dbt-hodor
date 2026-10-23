@@ -330,3 +330,12 @@ def test_unrendered_hash_sees_macro_changes():
     one = unrendered_hash("select {{ m() }}", {"macro.p.m": "1"}, {"materialized": "view"})
     two = unrendered_hash("select {{ m() }}", {"macro.p.m": "2"}, {"materialized": "view"})
     assert one != two
+
+
+def test_code_hash_ignores_the_environment_of_known_relations():
+    relations = {"prod.main.t": "model.p.t", "ci.pr_1_main.t": "model.p.t"}
+    prod = analyze_sql("select a from prod.main.t", relations=relations)
+    ci = analyze_sql("select a from ci.pr_1_main.t", relations=relations)
+    other = analyze_sql("select a from ci.pr_1_main.u", relations=relations)
+    assert prod.code_hash == ci.code_hash != other.code_hash
+    assert ci.tables == {"ci.pr_1_main.t"}

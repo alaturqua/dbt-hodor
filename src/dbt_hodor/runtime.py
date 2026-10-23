@@ -7,7 +7,7 @@ import os
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +23,7 @@ from dbt_hodor import __version__
 from dbt_hodor.config import NodeStateConfig, Settings, load_settings, node_state_config
 from dbt_hodor.engine import (
     BUILD,
+    CODE_PREFIX,
     REUSE,
     VOLATILE_PREFIX,
     Decision,
@@ -34,12 +35,19 @@ from dbt_hodor.hashing import (
     HASH_VERSION,
     SqlAnalysis,
     analyze_node_sql,
+    analyze_sql,
     config_hash,
     unrendered_hash,
 )
 from dbt_hodor.lineage import GraphNode, Lineage, external_inputs, normalize_relation
 from dbt_hodor.metadata import UNKNOWN, DataVersion
-from dbt_hodor.providers import DeltaProvider, DuckDBProvider, Provider, store_executor
+from dbt_hodor.providers import (
+    VIEW_PREFIX,
+    DeltaProvider,
+    DuckDBProvider,
+    Provider,
+    store_executor,
+)
 from dbt_hodor.records import Record
 from dbt_hodor.store import StateStore, StoreError
 
@@ -94,6 +102,18 @@ def build_graph(manifest: Any) -> dict[str, GraphNode]:
     for uid, source in manifest.sources.items():
         graph[uid] = GraphNode(uid, "source", None, _relation(source))
     return graph
+
+
+def _relation_ids(*graphs: Mapping[str, GraphNode]) -> dict[str, str]:
+    """{relation: unique_id} over the run's graph and the deferred state's graph. A name that
+    two nodes claim is left out, so it stays literal in the code hash."""
+    ids: dict[str, str] = {}
+    clashes: set[str] = set()
+    for graph in graphs:
+        for uid, node in graph.items():
+            if node.relation and ids.setdefault(node.relation, uid) != uid:
+                clashes.add(node.relation)
+    return {relation: uid for relation, uid in ids.items() if relation not in clashes}
 
 
 def model_kind(model: Any) -> str:
@@ -186,6 +206,12 @@ def open_store(
     )
 
 
+def _view_hash(analysis: SqlAnalysis) -> str:
+    """The hash names no relations, but a view keeps the names it reads."""
+    reads = "|".join(sorted(analysis.tables))
+    return f"{analysis.code_hash}:{hashlib.sha256(reads.encode('utf-8')).hexdigest()[:16]}"
+
+
 @dataclass
 class Plan:
     node_key: str
@@ -208,6 +234,7 @@ class Runtime:
         manifest: Any,
         store: StateStore,
         provider: Provider,
+        state_manifest: Any = None,
     ) -> None:
         self.invocation_id = invocation_id
         self.settings = settings
@@ -219,7 +246,19 @@ class Runtime:
         self.store = store
         self.provider = provider
         self.graph = build_graph(manifest)
-        self.lineage = Lineage(self.graph)
+        # --defer: the state manifest names the relations an unselected parent may be read from
+        self.state_manifest = state_manifest
+        self.state_graph = build_graph(state_manifest) if state_manifest is not None else {}
+        deferred = frozenset(
+            uid
+            for uid, node in self.state_graph.items()
+            if node.relation and uid in self.graph and node.relation != self.graph[uid].relation
+        )
+        self.lineage = Lineage(self.graph, deferred)
+        self.state_lineage = Lineage(self.state_graph)
+        self.relations = _relation_ids(self.graph, self.state_graph)
+        self._view_codes: dict[str, str] = {}  # node_key: code hash of a view built in this run
+        self._state_codes: dict[str, str | None] = {}  # unique_id: code hash of a --state view
         self._lock = threading.Lock()
         self._pending: list[Record] = []
         self._warned: set[str] = set()
@@ -259,7 +298,14 @@ class Runtime:
         )
 
     @classmethod
-    def create(cls, config: Any, adapter: Any, manifest: Any, invocation_id: str) -> Runtime | None:
+    def create(
+        cls,
+        config: Any,
+        adapter: Any,
+        manifest: Any,
+        invocation_id: str,
+        state_manifest: Any = None,
+    ) -> Runtime | None:
         settings = load_settings(
             _profile_settings(config), os.environ, lambda m: warn(f"dbt-hodor: {m}")
         )
@@ -276,7 +322,9 @@ class Runtime:
         except StoreError as exc:
             warn(f"dbt-hodor is off for this run: {exc}")
             return None
-        return cls(invocation_id, settings, config, adapter, manifest, store, provider)
+        return cls(
+            invocation_id, settings, config, adapter, manifest, store, provider, state_manifest
+        )
 
     def prefetch(self, selected_uids: Any) -> None:
         """Data versions of the selected nodes' targets and upstream tables, in parallel.
@@ -291,8 +339,12 @@ class Runtime:
                 continue
             if node.relation and node.materialized in OWN_DATA_KINDS:
                 tables.add(node.relation)
+            elif node.relation and node.materialized == "view":
+                tables.add(VIEW_PREFIX + node.relation)
             for parent in node.parents:
                 tables |= self.lineage.base_tables(parent) or frozenset()
+                if parent in self.state_graph:
+                    tables |= self.state_lineage.base_tables(parent) or frozenset()
         started = time.monotonic()
         self.provider.prefetch(sorted(tables), self.settings.metadata_threads)
         debug(f"dbt-hodor: read {len(tables)} data versions in {time.monotonic() - started:.1f}s")
@@ -361,11 +413,15 @@ class Runtime:
                 found.append(macro.unique_id)
         return found
 
-    def _config_hash(self, node: Any) -> str:
+    def _config_hash(self, node: Any, hooks: Sequence[str] = ()) -> str:
         columns = {name: col.to_dict() for name, col in (node.columns or {}).items()}
         constraints = [c.to_dict() for c in getattr(node, "constraints", None) or ()]
         return config_hash(
-            node.config.to_dict(omit_none=True), columns, constraints, self._execution_macros(node)
+            node.config.to_dict(omit_none=True),
+            columns,
+            constraints,
+            self._execution_macros(node),
+            [analyze_sql(sql, self.dialect, self.relations).code_hash for sql in hooks],
         )
 
     def _volatile_groups(
@@ -403,32 +459,86 @@ class Runtime:
             return self._volatile
 
     def _analyze(self, node: Any, last: Record | None) -> tuple[str, SqlAnalysis]:
+        # facts stored by an older hash version hold that version's code hash
+        current = last if last is not None and last.hash_version == HASH_VERSION else None
         return analyze_node_sql(
             node.compiled_code or "",
             self.invocation_id,
             self.run_started_at,
-            last.text_hash if last else None,
-            last.sql_facts if last else None,
+            current.text_hash if current else None,
+            current.sql_facts if current else None,
             self.dialect,
+            self.relations,
         )
 
     def _versions(self, tables: frozenset[str]) -> dict[str, DataVersion]:
         return {table: self.provider.version(table) for table in sorted(tables)}
+
+    def _parent_tables(
+        self, parent: str, reads: frozenset[str]
+    ) -> tuple[frozenset[str] | None, set[str]]:
+        """Base tables of one parent as a node's SQL reads it, and the relations it names.
+
+        With --defer, a parent is read from this target or from the deferred state. The
+        compiled SQL shows which: dbt's choice also depends on its relation cache.
+        """
+        node = self.graph.get(parent)
+        if node is not None and node.materialized == "ephemeral":  # inlined into this SQL
+            tables: set[str] = set()
+            named: set[str] = set()
+            for grandparent in node.parents:
+                found, names = self._parent_tables(grandparent, reads)
+                named |= names
+                if found is None:
+                    return None, named
+                tables |= found
+            return frozenset(tables), named
+        if self._via_state(parent, reads):
+            return self.state_lineage.base_tables(parent), {self.state_graph[parent].relation}  # type: ignore[arg-type]
+        named = {node.relation} if node is not None and node.relation else set()
+        return self.lineage.base_tables(parent), named
+
+    def _via_state(self, uid: str, reads: frozenset[str]) -> bool:
+        """Whether the compiled SQL reads this node from the --defer state, not this target."""
+        node, state = self.graph.get(uid), self.state_graph.get(uid)
+        return (
+            state is not None
+            and state.relation in reads
+            and (node is None or node.relation not in reads)
+        )
+
+    def _read_tables(self, unique_id: str, analysis: SqlAnalysis) -> frozenset[str] | None:
+        """The base tables a node's compiled SQL reads through its dbt parents."""
+        tables: set[str] = set()
+        for parent in self.graph[unique_id].parents:
+            found, _ = self._parent_tables(parent, analysis.tables)
+            if found is None:
+                return None
+            tables |= found
+        return frozenset(tables)
 
     def _upstream_groups(
         self, unique_id: str, own: str | None, analysis: SqlAnalysis
     ) -> dict[str, Mapping[str, DataVersion] | None]:
         groups: dict[str, Mapping[str, DataVersion] | None] = {}
         known: set[str] = {own} if own else set()
-        for parent, tables in self.lineage.upstream_groups(unique_id).items():
-            node = self.graph.get(parent)
-            if node is not None and node.relation:
-                known.add(node.relation)
+        for parent in self.graph[unique_id].parents:
+            tables, named = self._parent_tables(parent, analysis.tables)
+            known |= named
             if tables is None:
                 groups[parent] = None
                 continue
             known |= tables
             groups[parent] = self._versions(tables)
+        views: dict[str, str | None] = {}
+        for parent in self.graph[unique_id].parents:
+            via_state = self._via_state(parent, analysis.tables)
+            lineage = self.state_lineage if via_state else self.lineage
+            for view in lineage.views(parent):
+                views[view] = self._view_code(view, analysis.tables, via_state)
+        for view, code in sorted(views.items()):
+            key = f"{CODE_PREFIX}{view}"
+            groups[key] = {key: DataVersion(code)}
         ext = external_inputs(analysis, known)
         for table in sorted(ext.tables):
             groups[table] = {table: self.provider.version(table)}
@@ -437,6 +547,31 @@ class Runtime:
         if ext.unknown:
             groups[OPAQUE_GROUP] = None
         return groups
+
+    def _view_code(self, view: str, reads: frozenset[str], via_state: bool) -> str | None:
+        """What defines a view a read goes through: the code hash of this target's last build
+        of it, which covers macros and vars, or, for the view of the --state manifest, the hash
+        of its compiled SQL there. None when neither is known, so the node builds."""
+        ci = getattr(self.graph.get(view), "relation", None)
+        base = getattr(self.state_graph.get(view), "relation", None)
+        if via_state or self._via_state(view, reads):
+            return self._state_view_code(view)
+        last = self.records.get(ci) if ci else None
+        code = (self._view_codes.get(ci) if ci else None) or (last.code_hash if last else None)
+        if code is None and base not in (None, ci) and ci not in reads:
+            return self._state_view_code(view)  # a view in between: dbt reads the base one
+        return code
+
+    def _state_view_code(self, view: str) -> str | None:
+        if view not in self._state_codes:  # many nodes read the same base view
+            node = getattr(self.state_manifest, "nodes", {}).get(view)
+            compiled = getattr(node, "compiled_code", None)
+            self._state_codes[view] = (
+                _view_hash(analyze_sql(compiled, self.dialect, self.relations))
+                if compiled
+                else None
+            )
+        return self._state_codes[view]
 
     def _plan(
         self,
@@ -457,6 +592,14 @@ class Runtime:
                 self.errors += 1
             return Plan(node_key, Decision(BUILD, "hodor_error"), cfg, started, last)
         return Plan(node_key, decision, cfg, started, last, facts, text_hash, analysis)
+
+    def _fail_open(self, node: Any, plan: Plan, what: str, exc: Exception) -> None:
+        """A reuse that fails after the decision: the node builds or the test runs."""
+        warn(f"dbt-hodor: {what} {node.unique_id} failed, running it: {exc}")
+        with self._lock:
+            self.errors += 1
+        plan.decision = Decision(BUILD, "hodor_error")
+        self.decisions[node.unique_id] = plan.decision
 
     def _record(self, node: Any, plan: Plan, action: str, status: str, **extra: Any) -> None:
         facts = plan.facts
@@ -489,6 +632,8 @@ class Runtime:
             self.warn_once(f"cannot build a state record: {exc}")
             return
         with self._lock:
+            if facts is not None and facts.kind == "view" and status == "success":
+                self._view_codes[plan.node_key] = facts.code_hash
             self._pending.append(record)
             batch = self._pending if len(self._pending) >= FLUSH_EVERY else None
             if batch is not None:
@@ -513,7 +658,7 @@ class Runtime:
     # -- models --------------------------------------------------------------------------
 
     def _model_facts(
-        self, runner: Any, model: Any, cfg: NodeStateConfig, last: Record | None
+        self, runner: Any, model: Any, cfg: NodeStateConfig, last: Record | None, hooks: list[str]
     ) -> tuple[NodeFacts, str, SqlAnalysis]:
         kind = model_kind(model)
         if kind == "seed":
@@ -526,6 +671,10 @@ class Runtime:
         target = UNKNOWN
         if kind in OWN_DATA_KINDS and exists and relation:
             target = self.provider.version(relation)
+        elif kind == "view" and exists and relation:
+            target = self.provider.version(VIEW_PREFIX + relation)
+        if kind == "view" and self.state_graph:  # children expand this view as it reads now
+            self.lineage.set_reads(model.unique_id, self._read_tables(model.unique_id, analysis))
         groups = {}
         if kind in OWN_DATA_KINDS:  # a view computes volatile values when it is read
             groups = self._upstream_groups(model.unique_id, relation, analysis)
@@ -535,10 +684,16 @@ class Runtime:
             unrendered = unrendered_hash(
                 model.raw_code, self._macro_sql(model.depends_on.macros), model.unrendered_config
             )
+        hooks[:] = self._rendered_hooks(runner, model)
+        code = analysis.code_hash
+        if kind == "view":
+            code = _view_hash(analysis)
+            unrendered = unrendered and unrendered + code[len(analysis.code_hash) :]
         facts = NodeFacts(
             kind=kind,
-            code_hash=analysis.code_hash,
-            config_hash=self._config_hash(model),
+            code_hash=code,
+            # hooks render var(), target and env_var(), which the unrendered config hides
+            config_hash=self._config_hash(model, hooks),
             hash_version=HASH_VERSION,
             unrendered_hash=unrendered,
             full_refresh=full_refresh(model),
@@ -549,15 +704,19 @@ class Runtime:
         )
         return facts, text_hash, analysis
 
-    def _run_hooks(self, runner: Any, model: Any, manifest: Any) -> None:
+    def _rendered_hooks(self, runner: Any, model: Any) -> list[str]:
+        """The node's pre- and post-hooks as SQL, rendered as dbt renders them."""
+        if not (
+            getattr(model.config, "pre_hook", None) or getattr(model.config, "post_hook", None)
+        ):
+            return []
         from dbt.clients.jinja import get_rendered
         from dbt.context.providers import generate_runtime_model_context
 
-        context = generate_runtime_model_context(model, runner.config, manifest)
-        for hook in list(context["pre_hooks"] or []) + list(context["post_hooks"] or []):
-            sql = get_rendered(hook.get("sql") or "", context, model).strip()
-            if sql:
-                runner.adapter.execute(sql, auto_begin=False)
+        context = generate_runtime_model_context(model, runner.config, self.manifest)
+        hooks = list(context["pre_hooks"] or []) + list(context["post_hooks"] or [])
+        rendered = (get_rendered(hook.get("sql") or "", context, model).strip() for hook in hooks)
+        return [sql for sql in rendered if sql]
 
     def execute_model(self, runner: Any, model: Any, manifest: Any, original: Callable) -> Any:
         resource_type = _value(model.resource_type)
@@ -569,15 +728,18 @@ class Runtime:
         ):
             return original(runner, model, manifest)
         relation = _relation(model)
+        hooks: list[str] = []  # rendered while deciding, run on reuse
         plan = self._plan(
             model,
             relation or model.unique_id,
-            lambda cfg, last: self._model_facts(runner, model, cfg, last),
+            lambda cfg, last: self._model_facts(runner, model, cfg, last, hooks),
         )
         self.decisions[model.unique_id] = plan.decision
         if plan.decision.action == REUSE and self.settings.mode == "on":
             if plan.cfg.execute_hooks_on_reuse:
-                self._run_hooks(runner, model, manifest)
+                # no fail open once a hook ran: a build would run the hooks again
+                for sql in hooks:
+                    runner.adapter.execute(sql, auto_begin=False)
             self._record(model, plan, REUSE, RunStatus.Reused.value)
             self._count(plan)
             return RunResult.from_node(model, RunStatus.Reused, f"REUSED ({plan.decision.reason})")
@@ -590,6 +752,8 @@ class Runtime:
         version = UNKNOWN
         if plan.facts is not None and plan.facts.kind in OWN_DATA_KINDS and relation:
             version = self.provider.refresh(relation)
+        elif plan.facts is not None and plan.facts.kind == "view" and relation:
+            version = self.provider.refresh(VIEW_PREFIX + relation)
         self._record(
             model,
             plan,
@@ -635,13 +799,17 @@ class Runtime:
         )
         if plan.decision.action == REUSE and self.settings.mode == "on" and plan.last:
             recorded = plan.last.test_result or {}
-            data = TestResultData(
-                failures=int(recorded.get("failures") or 0),  # type: ignore[call-overload]
-                should_warn=bool(recorded.get("should_warn")),
-                should_error=bool(recorded.get("should_error")),
-                adapter_response={"_message": f"{REPLAY_PREFIX} ({plan.decision.reason})"},
-            )
-            result = runner.build_test_run_result(test, data)
+            try:
+                data = TestResultData(
+                    failures=int(recorded.get("failures") or 0),  # type: ignore[call-overload]
+                    should_warn=bool(recorded.get("should_warn")),
+                    should_error=bool(recorded.get("should_error")),
+                    adapter_response={"_message": f"{REPLAY_PREFIX} ({plan.decision.reason})"},
+                )
+                result = runner.build_test_run_result(test, data)
+            except Exception as exc:  # noqa: BLE001 - fail open
+                self._fail_open(test, plan, "replaying", exc)
+        if plan.decision.action == REUSE and self.settings.mode == "on" and plan.last:
             self._record(test, plan, REUSE, _value(result.status))
             self._count(plan)
             return result
@@ -693,7 +861,9 @@ _slot: tuple[str, Runtime | None] | None = None
 _slot_lock = threading.Lock()
 
 
-def get_runtime(config: Any, adapter: Any, manifest: Any) -> Runtime | None:
+def get_runtime(
+    config: Any, adapter: Any, manifest: Any, state_manifest: Any = None
+) -> Runtime | None:
     """The runtime of the current dbt invocation, created on the first node."""
     global _slot
     invocation = get_invocation_id()
@@ -703,7 +873,7 @@ def get_runtime(config: Any, adapter: Any, manifest: Any) -> Runtime | None:
     with _slot_lock:
         if _slot is None or _slot[0] != invocation:
             try:
-                runtime = Runtime.create(config, adapter, manifest, invocation)
+                runtime = Runtime.create(config, adapter, manifest, invocation, state_manifest)
             except Exception as exc:  # noqa: BLE001 - fail open for the whole run
                 warn(f"dbt-hodor is off for this run: {exc}")
                 runtime = None
@@ -716,8 +886,14 @@ def start_runtime(task: Any, selected_uids: Any) -> None:
     from dbt.adapters.factory import get_adapter
 
     adapter = get_adapter(task.config)
+    state_manifest = None
+    if getattr(task.args, "defer", False):
+        try:
+            state_manifest = task._get_deferred_manifest()
+        except Exception as exc:  # noqa: BLE001 - nothing is read from the state
+            warn(f"dbt-hodor: cannot read the --state manifest: {exc}")
     with adapter.connection_named("hodor"):
-        runtime = get_runtime(task.config, adapter, task.manifest)
+        runtime = get_runtime(task.config, adapter, task.manifest, state_manifest)
     if runtime is not None:
         runtime.prefetch(selected_uids)
 
