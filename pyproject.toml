@@ -1,6 +1,6 @@
 [project]
 name = "dbt-hodor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reuse unchanged dbt nodes and rebuild only when code or upstream data changed. A free, self-hosted alternative to dbt State."
 readme = "README.md"
 license = "Apache-2.0"
