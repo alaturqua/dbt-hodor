@@ -24,9 +24,13 @@ Unknown operations count as changes on purpose. A new Delta operation name can c
 
 ## Trino (Iceberg and Delta Lake connectors)
 
-hodor runs `select * from "<catalog>"."<schema>"."<table>$history"` and reads the columns it gets back. The Iceberg branch was tested against Trino 476 in Docker (see [Development](../development.md)); the Delta Lake branch is covered by unit tests only.
+hodor runs `select * from "<catalog>"."<schema>"."<table>$history"` and reads the columns it gets back. The Iceberg branch was tested live against Trino 476 in Docker (see [Development](../development.md)). The Delta Lake branch is covered by unit tests only.
 
-- **Iceberg** (columns `made_current_at`, `snapshot_id` and `is_current_ancestor`): the token is the `snapshot_id` and the `made_current_at` time of the row with the latest `made_current_at` among the rows where `is_current_ancestor` is true, plus the time and file of the latest entry in `"<table>$metadata_log_entries"`. hodor does not take the newest committed snapshot. A rollback adds no row: it sets `is_current_ancestor` to false on the rolled-back snapshots, so the token moves back to an older snapshot and changes. A schema change (`ADD`, `DROP` or `RENAME COLUMN`) adds no snapshot but writes a new metadata file, so the log part of the token changes, like `ADD COLUMNS` and `RENAME COLUMN` in the Delta history. Any other metadata commit moves the token too, which can cause an extra build. A history without a current-ancestor row, two current snapshots with the same time, two metadata log entries with the same time and different files, or an empty metadata log is unknown.
+- **Iceberg** (columns `made_current_at`, `snapshot_id` and `is_current_ancestor`):
+    - Token: the `snapshot_id` and the `made_current_at` time of the row with the latest `made_current_at` among the rows where `is_current_ancestor` is true, plus the time and file of the latest entry in `"<table>$metadata_log_entries"`. hodor does not take the newest committed snapshot.
+    - Rollback: a rollback adds no row. It sets `is_current_ancestor` to false on the rolled-back snapshots, so the token moves back to an older snapshot and changes.
+    - Schema change (tested with `ADD COLUMN`): it adds no snapshot but writes a new metadata file, so the log part of the token changes. Any other metadata commit moves the token too, which can cause an extra build.
+    - Unknown: a history without a current-ancestor row, two current snapshots with the same time, two metadata log entries with the same time and different files, an empty metadata log, or a time hodor cannot read.
 - **Delta Lake** (columns `version`, `timestamp` and `operation`): the same rules as Delta on Databricks apply, including the list of operations that never count. The Trino history has no `operationMetrics`, so every operation outside that list counts as a data change.
 - **Other connectors**: Hive, memory and the rest have no `$history` table. The query fails, the table is unknown, and every node that depends on it builds. A table whose history is empty or has other columns is unknown too.
 

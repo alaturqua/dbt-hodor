@@ -95,7 +95,7 @@ dbt imports every installed top-level module named `dbt_*` that has a `plugins` 
 
         Git Bash rewrites an environment value that looks like an absolute POSIX path when it starts a native program, so `HODOR_DBX_HTTP_PATH=/sql/1.0/warehouses/<id>` reaches Python as `C:/Program Files/Git/sql/1.0/warehouses/<id>` and the connection fails with a 404 on `OpenSession`. Use PowerShell or `cmd`, or set `MSYS_NO_PATHCONV=1`.
 
-- The live test in `tests/integration/test_trino_iceberg.py` runs real dbt-trino builds on a Trino Iceberg catalog with the state in a local DuckDB file: first run builds, second run reuses, a new source row rebuilds the tables while the unchanged view stays reused, a rollback with `rollback_to_snapshot` rebuilds them, a changed view definition rebuilds the view, and `ALTER TABLE ... ADD COLUMN` on a source rebuilds a `select *` table. It was run against Trino 476 in Docker. The Delta Lake connector has no live test. It is marked `trino` and skipped by default, and skips itself when no server answers. `HODOR_TEST_TRINO_HOST` and `HODOR_TEST_TRINO_PORT` default to `localhost` and `8080`. The test creates one schema per run and drops it at the end.
+- The live test in `tests/integration/test_trino_iceberg.py` runs real dbt-trino builds on a Trino Iceberg catalog with the state in a local DuckDB file: first run builds, second run reuses, a new source row rebuilds the tables while the unchanged view stays reused, a rollback with `rollback_to_snapshot` rebuilds them, a changed view definition rebuilds the view, and `ALTER TABLE ... ADD COLUMN` on a source rebuilds a `select *` table. It covers the Iceberg and Delta Lake connectors as described in [Data versions](how-it-works/data-versions.md#trino-iceberg-and-delta-lake-connectors). It is marked `trino` and skipped by default, and skips itself when no server answers. `HODOR_TEST_TRINO_HOST` and `HODOR_TEST_TRINO_PORT` default to `localhost` and `8080`. The test creates one schema per run and drops it at the end.
 
     ```sh
     docker run -d --name hodor-trino -p 8080:8080 \
@@ -104,7 +104,7 @@ dbt imports every installed top-level module named `dbt_*` that has a `plugins` 
     uv run pytest -m trino tests/integration
     ```
 
-    The mounted directory holds `iceberg.properties`: `connector.name=iceberg`, `iceberg.catalog.type=TESTING_FILE_METASTORE`, `hive.metastore.catalog.dir=local:///iceberg`, `fs.native-local.enabled=true` and `local.location=/data`. Wait until the server answers before running the test.
+    The mounted directory holds the catalog file `tests/integration/trino_catalog/iceberg.properties`. Before running the test, check that the server answers: `docker exec hodor-trino trino --execute "select 1"`.
 
 - The live test in `tests/e2e/test_postgres_state.py` runs real dbt-duckdb builds with the state in Postgres: first run records, second run reuses, new upstream data rebuilds the table while the unchanged view stays reused, a code change rebuilds. The warehouse stays DuckDB, so it tests the store and the decision path rather than a warehouse. It is marked `postgres` and skipped by default, and it works against Databricks Lakebase or any other Postgres. `HODOR_PG_SCHEMA` is dropped with `CASCADE` at the start and the end, so point it at a schema that holds nothing else.
 

@@ -87,7 +87,7 @@ Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
 
 ## Scope of v1
 
-Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular). Adapters: `dbt-databricks` 1.12.7, `dbt-duckdb` and `dbt-trino` 1.10.6 (Iceberg and Delta Lake connectors only; Iceberg tested live on Trino 476, Delta Lake by unit tests only), with dbt-core 1.12.x.
+Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular). Adapters: `dbt-databricks` 1.12.7, `dbt-duckdb` and `dbt-trino` 1.10.6 (Iceberg and Delta Lake connectors only; see [Data versions](how-it-works/data-versions.md#trino-iceberg-and-delta-lake-connectors)), with dbt-core 1.12.x.
 
 Always built as plain dbt:
 

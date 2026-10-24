@@ -771,7 +771,7 @@ svg.door { width:100%; max-height:250px; }
   <div class="note"><b>Early development.</b> The engine and stores pass end-to-end tests on dbt-duckdb and a live test on Databricks. Not yet proven in a large production project.</div>
 
   <h3 id="d-what">What it is</h3>
-  <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, dbt-trino 1.10.6 (Iceberg and Delta Lake connectors; Iceberg tested live on Trino 476, Delta Lake by unit tests only), and dbt-duckdb for local development and tests.</p>
+  <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, dbt-trino 1.10.6 (Iceberg and Delta Lake connectors), and dbt-duckdb for local development and tests.</p>
 
   <h3 id="d-install">Install</h3>
   <p>Install dbt-hodor from PyPI in the environment where dbt runs. dbt loads any installed module named <code>dbt_*</code> that has a <code>plugins</code> list, so there is nothing to configure in dbt.</p>
