@@ -31,7 +31,9 @@ IGNORED_STATE_KEYS = frozenset({"pre_clone", "allow_clones", "defer_to_target"})
 _HOOK_KEYS = ("execute_hooks_on_any_reuse", "execute_hooks_on_reuse")
 
 MODES = ("off", "shadow", "on")
-STORES = ("delta", "duckdb", "postgres")
+STORES = ("delta", "duckdb", "postgres", "trino")
+# The store when hodor_store is unset, by adapter type. Other adapters get delta.
+_ADAPTER_STORES = {"trino": "trino"}
 _STORE_ALIASES = {"lakebase": "postgres"}  # Lakebase is Postgres; the store code is the same
 # One name part (database, schema or table). Stores always quote it.
 IDENT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
@@ -188,12 +190,16 @@ def _pattern_setting(
 
 
 def load_settings(
-    profile_target: Mapping[str, object], environ: Mapping[str, str], warn: Warn
+    profile_target: Mapping[str, object],
+    environ: Mapping[str, str],
+    warn: Warn,
+    adapter_type: str | None = None,
 ) -> Settings:
     """Read `hodor_<name>` settings (profile keys, overlaid with `--vars` by the caller);
     `HODOR_<NAME>` env vars override them.
 
-    hodor_database defaults to the target's own catalog (Databricks) or database.
+    hodor_store defaults by adapter type: trino gets trino, any other adapter delta.
+    hodor_database defaults to the target's own catalog (Databricks, Trino) or database.
     """
     raw: dict[str, object] = {}
     for name in _SETTING_NAMES:
@@ -210,14 +216,15 @@ def load_settings(
     if mode not in MODES:
         warn(f"invalid hodor_mode {mode!r}; using {defaults.mode!r}")
         mode = defaults.mode
-    store = str(raw.get("store", defaults.store)).lower()
+    default_store = _ADAPTER_STORES.get(adapter_type or "", defaults.store)
+    store = str(raw.get("store", default_store)).lower()
     store = _STORE_ALIASES.get(store, store)
     if store not in STORES:
-        warn(f"invalid hodor_store {store!r}; using {defaults.store!r}")
-        store = defaults.store
+        warn(f"invalid hodor_store {store!r}; using {default_store!r}")
+        store = default_store
     target_database = profile_target.get("catalog") or profile_target.get("database")
-    # Only delta lives in the target's own catalog. A Postgres database is unrelated to it.
-    if store == "delta" and "database" not in raw and target_database:
+    # Only delta and trino live in the target's own catalog. A Postgres database is unrelated.
+    if store in ("delta", "trino") and "database" not in raw and target_database:
         raw["database"] = target_database
     database = _ident_setting(raw, "database", warn)
     schema = _ident_setting(raw, "schema", warn)

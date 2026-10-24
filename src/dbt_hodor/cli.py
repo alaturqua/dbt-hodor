@@ -27,10 +27,13 @@ def _days(value: str) -> int:
 
 
 def _ddl(args: argparse.Namespace) -> str:
-    if args.store == "delta":
+    if args.store in ("delta", "trino"):
         if not args.database or not args.schema:
-            raise SystemExit("dbt-hodor ddl: --database and --schema are required for delta")
-        table = ".".join(f"`{p}`" for p in (args.database, args.schema, args.table))
+            raise SystemExit(
+                f"dbt-hodor ddl: --database and --schema are required for {args.store}"
+            )
+        quote = "`" if args.store == "delta" else '"'
+        table = ".".join(f"{quote}{p}{quote}" for p in (args.database, args.schema, args.table))
     elif args.store == "postgres" and not args.schema:
         raise SystemExit("dbt-hodor ddl: --schema is required for postgres")
     else:
@@ -59,14 +62,17 @@ def _open_store(
     project = load_project(str(flags.PROJECT_DIR), False, profile, {}, require_vars=False)
     config = RuntimeConfig.from_parts(project, profile, flags)
     settings = load_settings(
-        _profile_settings(config), os.environ, lambda m: print(f"dbt-hodor: {m}", file=sys.stderr)
+        _profile_settings(config),
+        os.environ,
+        lambda m: print(f"dbt-hodor: {m}", file=sys.stderr),
+        config.credentials.type,
     )
-    if settings.store == "delta" and not (settings.database and settings.schema):
+    if settings.store in ("delta", "trino") and not (settings.database and settings.schema):
         raise SystemExit(
-            f"dbt-hodor {command}: the delta store needs hodor_database and hodor_schema"
+            f"dbt-hodor {command}: the {settings.store} store needs hodor_database and hodor_schema"
         )
     adapter = None
-    if settings.store == "delta":  # the state table is read through dbt's own connection
+    if settings.store in ("delta", "trino"):  # the state table is read through dbt's own connection
         register_adapter(config, get_mp_context())
         adapter = get_adapter(config)
     try:
@@ -139,8 +145,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ddl = commands.add_parser(
         "ddl", help="print the CREATE TABLE statement for the state table (for manual creation)"
     )
-    ddl.add_argument("--store", choices=("delta", "duckdb", "postgres"), default="delta")
-    ddl.add_argument("--database", type=_ident, help="catalog (delta)")
+    ddl.add_argument("--store", choices=("delta", "duckdb", "postgres", "trino"), default="delta")
+    ddl.add_argument("--database", type=_ident, help="catalog (delta, trino)")
     ddl.add_argument("--schema", type=_ident)
     ddl.add_argument("--table", type=_ident, default="hodor_state")
     explain = commands.add_parser(

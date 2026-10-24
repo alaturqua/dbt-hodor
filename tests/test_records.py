@@ -33,3 +33,10 @@ def test_latest_builds_sql_avoids_qualify():
     sql = latest_builds_sql("t", "?", "?", "?").upper()
     assert "QUALIFY" not in sql
     assert "ROW_NUMBER()" in sql
+
+
+def test_create_table_sql_for_trino():
+    trino = create_table_sql('"c"."s"."hodor_state"', "trino")
+    assert "record_id varchar" in trino
+    assert "recorded_at_ms bigint" in trino
+    assert "CLUSTER BY" not in trino

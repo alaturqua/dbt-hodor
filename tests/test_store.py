@@ -4,7 +4,8 @@ from sqlglot import exp
 
 from dbt_hodor.records import COLUMN_NAMES, Record
 from dbt_hodor.store import StoreError
-from dbt_hodor.store.delta import DeltaStore, quote_table, sql_literal
+from dbt_hodor.store.delta import DeltaStore, quote_table, sql_literal, trino_literal
+from dbt_hodor.store.trino import TrinoStore
 
 duckdb = pytest.importorskip("duckdb")
 from dbt_hodor.store.duckdb import DuckDBStore  # noqa: E402
@@ -231,3 +232,70 @@ def test_delta_store_skips_create_when_the_table_exists():
     warehouse = FakeWarehouse(exists=True)
     DeltaStore("c", "s", "hodor_state", warehouse)
     assert warehouse.statements == ["SELECT * FROM `c`.`s`.`hodor_state` LIMIT 0"]
+
+
+@pytest.mark.parametrize(
+    ("value", "literal"),
+    [
+        (None, "NULL"),
+        (True, "TRUE"),
+        (7, "7"),
+        ("plain", "'plain'"),
+        ("O'Brien", "'O''Brien'"),
+        ("''", "''''''"),
+        ("back\\slash", "'back\\slash'"),
+        ("a\\'b", "'a\\''b'"),
+        ("line1\nline2\r\n", "'line1\nline2\r\n'"),
+        ("caf\u00e9 \u2603 \U0001f600", "'caf\u00e9 \u2603 \U0001f600'"),
+    ],
+)
+def test_trino_literal(value, literal):
+    assert trino_literal(value) == literal
+
+
+def test_trino_literal_rejects_other_types():
+    with pytest.raises(TypeError):
+        trino_literal(1.5)
+
+
+def test_trino_store_quotes_with_double_quotes_and_creates_a_trino_table():
+    warehouse = FakeWarehouse()
+    TrinoStore("iceberg", "ops", "hodor_state", warehouse)
+    probe, create = warehouse.statements
+    assert probe == 'SELECT * FROM "iceberg"."ops"."hodor_state" LIMIT 0'
+    assert create.startswith('CREATE TABLE IF NOT EXISTS "iceberg"."ops"."hodor_state"')
+    assert "record_id varchar" in create
+    assert "recorded_at_ms bigint" in create
+    assert "CLUSTER BY" not in create
+    with pytest.raises(StoreError):
+        TrinoStore("c", "s", 'bad"name', FakeWarehouse())
+    with pytest.raises(StoreError):
+        TrinoStore("c", "s", "hodor_state", FakeWarehouse(fail=True))
+
+
+def test_trino_store_inserts_parse_back_with_trino_literals(record):
+    warehouse = FakeWarehouse()
+    store = TrinoStore("c", "s", "hodor_state", warehouse, batch_size=2)
+    tricky = record(
+        record_id="x", reason="it's \\ odd", test_result={"message": "a'b\nc\\d \u00e9"}
+    )
+    store.append([record(record_id="1"), record(record_id="2"), tricky])
+    inserts = warehouse.statements[2:]
+    assert len(inserts) == 2
+    parsed = sqlglot.parse_one(inserts[1], read="trino")
+    values = [
+        None if isinstance(v, exp.Null) else v.this if v.is_string else int(v.this)
+        for v in parsed.find(exp.Tuple).expressions
+    ]
+    assert values == list(tricky.to_row())
+
+
+def test_trino_store_reads_with_trino_literals(record):
+    warehouse = FakeWarehouse(rows=[record().to_row()])
+    store = TrinoStore("c", "s", "hodor_state", warehouse, read_only=True)
+    assert store.load("pro'j", "prod", 5) == {"c.s.fct": record()}
+    select = warehouse.statements[-1]
+    assert "project_name = 'pro''j' AND target_name = 'prod'" in select
+    assert sqlglot.parse_one(select, read="trino").find(exp.Window) is not None
+    assert store.invocation("proj", "prod", None) == [record()]
+    assert 'FROM "c"."s"."hodor_state"' in warehouse.statements[-1]

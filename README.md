@@ -110,9 +110,9 @@ Set them on the `profiles.yml` target, or for one run with `--vars '{hodor_mode:
 | Profile key | Env var | Default | Values |
 | --- | --- | --- | --- |
 | `hodor_mode` | `HODOR_MODE` | `shadow` | `off`, `shadow`, `on` |
-| `hodor_store` | `HODOR_STORE` | `delta` | `delta`, `duckdb`, `postgres` (alias `lakebase`) |
-| `hodor_database` | `HODOR_DATABASE` | the target's `catalog` (or `database`) | Databricks catalog; Postgres database (later). Not used by `duckdb` |
-| `hodor_schema` | `HODOR_SCHEMA` | none for `delta` (required); `main` for `duckdb` | schema name |
+| `hodor_store` | `HODOR_STORE` | `trino` on the `trino` adapter, `delta` otherwise | `delta`, `duckdb`, `postgres` (alias `lakebase`), `trino` |
+| `hodor_database` | `HODOR_DATABASE` | the target's `catalog` (or `database`) | Databricks or Trino catalog; Postgres database (later). Not used by `duckdb` |
+| `hodor_schema` | `HODOR_SCHEMA` | none for `delta` and `trino` (required); `main` for `duckdb` | schema name |
 | `hodor_table` | `HODOR_TABLE` | `hodor_state` | table name |
 | `hodor_path` | `HODOR_PATH` | `.hodor/state.duckdb` | DuckDB database file, for `duckdb` |
 | `hodor_metadata_threads` | `HODOR_METADATA_THREADS` | `8` | 1-64 |
@@ -125,10 +125,11 @@ Name parts may contain letters, digits, `_` and `-`. hodor always quotes them.
 | Store | Location | Created on first use |
 | --- | --- | --- |
 | `delta` | `<hodor_database>.<hodor_schema>.<hodor_table>` | the table only. The schema must exist, because creating one needs catalog-level grants |
+| `trino` | `<hodor_database>.<hodor_schema>.<hodor_table>` in a Trino catalog | the table only. The schema must exist |
 | `duckdb` | table `<hodor_schema>.<hodor_table>` in the file `hodor_path` | the file, the schema and the table |
 | `postgres` (alias `lakebase`) | `<hodor_schema>.<hodor_table>` in the Postgres database `hodor_database` | the schema and the table |
 
-`delta` has no default schema on purpose: hodor writes nothing to a catalog until someone names the schema. Without it, hodor turns itself off with a warning.
+`delta` and `trino` have no default schema on purpose: hodor writes nothing to a catalog until someone names the schema. Without it, hodor turns itself off with a warning.
 
 ```yaml
 # profiles.yml

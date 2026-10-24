@@ -4,6 +4,16 @@ What changes for a running project from one release to the next. Each release li
 
 Until 1.0, the settings and the record schema may change in a minor release.
 
+## Unreleased
+
+### Behavior changes
+
+- **The default store follows the adapter.** With no `hodor_store`, the `trino` adapter now uses the new `trino` store, which writes the state table through dbt's connection into the catalog `hodor_database` (default: the target's `database`) and the schema `hodor_schema`. Before, an unset store meant `delta`, which turns hodor off on Trino. `databricks` keeps `delta`, and `duckdb` keeps `delta` too, so hodor stays off there until you set `hodor_store`. A `hodor_store` you set always wins. Without `hodor_schema` on Trino, hodor is off for the run with a warning, as for `delta`.
+
+### New
+
+- **`trino` store.** The state table lives in a Trino catalog (Iceberg or Delta Lake connector). See [State stores](stores.md#trino).
+
 ## 0.2.0
 
 ### Breaking changes
