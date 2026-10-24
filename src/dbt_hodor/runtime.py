@@ -207,6 +207,21 @@ def open_store(
     )
 
 
+def provider_class_for(adapter_type: str, store: str) -> type[Provider] | None:
+    """The provider for this adapter, or None (with a warning) when hodor must be off."""
+    provider_class = PROVIDERS.get(adapter_type)
+    if provider_class is None:
+        warn(f"dbt-hodor is off: adapter {adapter_type!r} is not supported")
+        return None
+    if store == "delta" and adapter_type != "databricks":
+        warn(
+            f"dbt-hodor is off: store 'delta' needs the databricks adapter, not "
+            f"{adapter_type!r}; set hodor_store to duckdb or postgres"
+        )
+        return None
+    return provider_class
+
+
 def _view_hash(analysis: SqlAnalysis) -> str:
     """The hash names no relations, but a view keeps the names it reads."""
     reads = "|".join(sorted(analysis.tables))
@@ -313,16 +328,8 @@ class Runtime:
         if settings.mode == "off":
             info("dbt-hodor is off")
             return None
-        adapter_type = adapter.type()
-        provider_class = PROVIDERS.get(adapter_type)
+        provider_class = provider_class_for(adapter.type(), settings.store)
         if provider_class is None:
-            warn(f"dbt-hodor is off: adapter {adapter_type!r} is not supported")
-            return None
-        if settings.store == "delta" and adapter_type != "databricks":
-            warn(
-                f"dbt-hodor is off: store 'delta' needs the databricks adapter, not "
-                f"{adapter_type!r}; set hodor_store to duckdb or postgres"
-            )
             return None
         provider = provider_class(adapter, debug)
         try:

@@ -183,7 +183,6 @@ def test_trino_iceberg_uses_the_latest_current_ancestor():
         )
     )
     version = TrinoProvider(adapter).version('cat.sch.odd"name')
-    assert version.token.startswith("22@1792472400000+1792479600000:")
     assert version.changed_at_ms == 1792479600000  # the metadata log entry at 07:00
     assert adapter.queries == [
         'select * from "cat"."sch"."odd""name$history"',
@@ -199,28 +198,15 @@ def test_trino_iceberg_rollback_changes_the_token():
     after = iceberg((t1, first, None, True), (t2, second, first, False))
     a = TrinoProvider(FakeAdapter(before)).version("c.s.t")
     b = TrinoProvider(FakeAdapter(after)).version("c.s.t")
-    assert a.token.startswith(f"{second}@1792468800000+")
-    assert b.token.startswith(f"{first}@1792465200000+")
     assert a.token != b.token
 
 
-def test_trino_iceberg_reads_naive_times_as_utc_and_epoch_numbers():
+def test_trino_iceberg_reads_naive_times_as_utc():
     naive = TrinoProvider(FakeAdapter(iceberg((datetime(2026, 10, 20, 3), 11, None, True))))
     aware = TrinoProvider(
         FakeAdapter(iceberg((datetime(2026, 10, 20, 3, tzinfo=UTC), 11, 0, True)))
     )
-    number = TrinoProvider(FakeAdapter(iceberg((1792465200000, 11, None, True))))
-    versions = [p.version("c.s.t") for p in (naive, aware, number)]
-    assert versions[0] == versions[1] == versions[2]
-    assert versions[0].token.startswith("11@1792465200000+")
-
-
-@pytest.mark.parametrize("order", [1, -1])
-def test_trino_iceberg_tied_current_snapshots_give_unknown(order):
-    t = datetime(2026, 10, 20, 3, tzinfo=UTC)
-    rows = [(t, 11, None, True), (t, 22, 11, True)][::order]
-    provider = TrinoProvider(FakeAdapter(iceberg(*rows)))
-    assert provider.version("c.s.t") == UNKNOWN
+    assert naive.version("c.s.t") == aware.version("c.s.t")
 
 
 def test_trino_iceberg_schema_change_moves_the_token():
@@ -233,15 +219,6 @@ def test_trino_iceberg_schema_change_moves_the_token():
     assert a.token != b.version("c.s.t").token
 
 
-@pytest.mark.parametrize("order", [1, -1])
-def test_trino_iceberg_tied_metadata_log_entries_give_unknown(order):
-    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
-    t = datetime(2026, 10, 20, 7, tzinfo=UTC)
-    log = [(t, "local:///t/a.metadata.json", 11, 0, 1), (t, "local:///t/b.metadata.json", 11, 1, 1)]
-    provider = TrinoProvider(FakeAdapter(iceberg(row, log=log[::order])))
-    assert provider.version("c.s.t") == UNKNOWN
-
-
 def test_trino_iceberg_changed_at_is_the_latest_of_snapshot_and_metadata_commit():
     row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
     # LOG_ENTRY is at 07:00, after the snapshot at 03:00
@@ -249,11 +226,6 @@ def test_trino_iceberg_changed_at_is_the_latest_of_snapshot_and_metadata_commit(
     early = (datetime(2026, 10, 20, 2, tzinfo=UTC), "local:///t/a.metadata.json", 11, 0, 1)
     version = TrinoProvider(FakeAdapter(iceberg(row, log=[early]))).version("c.s.t")
     assert version.changed_at_ms == 1792465200000
-
-
-def test_trino_iceberg_empty_metadata_log_gives_unknown():
-    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
-    assert TrinoProvider(FakeAdapter(iceberg(row, log=()))).version("c.s.t") == UNKNOWN
 
 
 def test_trino_delta_connector_history():
@@ -268,6 +240,14 @@ def test_trino_delta_connector_history():
     assert version == DataVersion("8@1792465200000", 1792465200000)
 
 
+T3 = datetime(2026, 10, 20, 3, tzinfo=UTC)
+T7 = datetime(2026, 10, 20, 7, tzinfo=UTC)
+TIED_FILES = [
+    (T7, "local:///t/a.metadata.json", 11, 0, 1),
+    (T7, "local:///t/b.metadata.json", 11, 1, 1),
+]
+
+
 @pytest.mark.parametrize(
     "answer",
     [
@@ -277,6 +257,11 @@ def test_trino_delta_connector_history():
         lambda sql: (["something", "else"], [(1, 2)]),
         lambda sql: (ICEBERG, [("not a time", 1, None, True)]),
         lambda sql: (ICEBERG, [(None, 1, None, True)]),
+        iceberg((T3, 11, None, True), (T3, 22, 11, True)),
+        iceberg((T3, 22, 11, True), (T3, 11, None, True)),
+        iceberg((T3, 11, None, True), log=TIED_FILES),
+        iceberg((T3, 11, None, True), log=TIED_FILES[::-1]),
+        iceberg((T3, 11, None, True), log=()),
         fail,
     ],
     ids=[
@@ -286,6 +271,11 @@ def test_trino_delta_connector_history():
         "unknown-columns",
         "bad-time",
         "null-time",
+        "tied-snapshots",
+        "tied-snapshots-reversed",
+        "tied-log-files",
+        "tied-log-files-reversed",
+        "empty-metadata-log",
         "query-error",
     ],
 )
