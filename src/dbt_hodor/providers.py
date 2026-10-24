@@ -7,11 +7,13 @@ import threading
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
 
 from dbt_hodor.metadata import (
     UNKNOWN,
     DataVersion,
+    _epoch_ms,
     delta_data_version,
     duckdb_fingerprint_sql,
     history_entry_from_row,
@@ -173,6 +175,64 @@ class DeltaProvider(Provider):
 
     def path_version(self, path: str) -> DataVersion:
         return self.version(f"delta:{path}")
+
+
+def _history_ms(value: Any) -> int:
+    """Epoch milliseconds from a driver value: a datetime (naive means UTC) or a number."""
+    if isinstance(value, bool):
+        raise LookupError(f"unreadable history time {value!r}")
+    if isinstance(value, datetime):
+        ms = _epoch_ms(value)
+        if ms is not None:
+            return ms
+    if isinstance(value, int | float):
+        return int(value)
+    raise LookupError(f"unreadable history time {value!r}")
+
+
+class TrinoProvider(Provider):
+    """Iceberg and Delta Lake connectors, through their hidden "$history" tables.
+
+    Other connectors have no such table: the query fails and the node builds.
+    """
+
+    clock_sql = "select cast(to_unixtime(current_timestamp) * 1000 as bigint)"
+    volatile_sql = (
+        "select cast(current_date as varchar), current_user, current_catalog,"
+        " current_schema, current_timezone(), version()"
+    )
+
+    def _history(self, key: str) -> DataVersion:
+        *head, name = key.split(".")
+        history = _quote(".".join(head), '"') + '."' + name.replace('"', '""') + '$history"'
+        names, rows = fetch(self._adapter, f"select * from {history}")
+        if not rows:
+            raise LookupError("empty history")
+        records = [dict(zip(names, row, strict=True)) for row in rows]
+        if {"made_current_at", "snapshot_id", "is_current_ancestor"} <= set(names):
+            # A rollback adds no row: it clears is_current_ancestor on the rolled-back snapshots.
+            ancestors = [r for r in records if r["is_current_ancestor"] is True]
+            if not ancestors:
+                raise LookupError("no current snapshot in the history")
+            current = max(ancestors, key=lambda r: _history_ms(r["made_current_at"]))
+            ms = _history_ms(current["made_current_at"])
+            return DataVersion(f"{current['snapshot_id']}@{ms}", ms)
+        if {"version", "timestamp", "operation"} <= set(names):
+            return delta_data_version(history_entry_from_row(r) for r in records)
+        raise LookupError(f"unknown history columns {names}")
+
+    def _query(self, key: str) -> DataVersion:
+        if key.startswith(VIEW_PREFIX):
+            catalog, schema, name = key[len(VIEW_PREFIX) :].split(".")
+            quoted = _quote(catalog, '"')
+            _, rows = fetch(
+                self._adapter,
+                f"select view_definition from {quoted}.information_schema.views "
+                f"where lower(table_schema) = {_literal(schema)} "
+                f"and lower(table_name) = {_literal(name)}",
+            )
+            return _definition(rows)
+        return self._history(key)
 
 
 def store_executor(adapter: Any) -> Callable[[str], Sequence[Sequence[object]]]:

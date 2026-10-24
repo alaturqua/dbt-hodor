@@ -38,7 +38,7 @@ Set them as keys on the active `profiles.yml` target. An environment variable ov
 | Profile key | Env var | Default | Values |
 | --- | --- | --- | --- |
 | `hodor_mode` | `HODOR_MODE` | `shadow` | `off`, `shadow`, `on` |
-| `hodor_store` | `HODOR_STORE` | `delta` | `delta`, `duckdb`, `postgres` (alias `lakebase`) |
+| `hodor_store` | `HODOR_STORE` | `delta` | `delta`, `duckdb`, `postgres` (alias `lakebase`). `delta` needs the `databricks` adapter; on `duckdb` and `trino` set another store |
 | `hodor_database` | `HODOR_DATABASE` | the target's `catalog` (or `database`), for `delta` only | Databricks catalog, or Postgres database. Required for `postgres`: a Postgres database is unrelated to the dbt target, so it has no default. Not used by `duckdb` |
 | `hodor_schema` | `HODOR_SCHEMA` | none for `delta` and `postgres` (required); `main` for `duckdb` | schema name |
 | `hodor_table` | `HODOR_TABLE` | `hodor_state` | table name |

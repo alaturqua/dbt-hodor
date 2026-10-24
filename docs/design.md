@@ -14,7 +14,7 @@ Requirements:
 - Stores state in a Delta table (default on Databricks), in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 - Uses the dbt State model configs (`state:` block), so projects can switch between the two.
 - Works in Databricks `dbt_task` jobs. Every command in a `dbt_task` must start with `dbt` (`databricks/sdk/service/jobs.py:1562`), so a wrapper CLI is not an option. hodor must load inside the dbt process.
-- Supported adapters: `databricks` for real environments, and `duckdb` (dbt-duckdb) for local development and tests. Local work runs end to end on DuckDB, with no Databricks access. hodor disables itself on any other adapter.
+- Supported adapters: `databricks` for real environments, and `duckdb` (dbt-duckdb) for local development and tests. Local work runs end to end on DuckDB, with no Databricks access. `trino` (dbt-trino) is supported for the Iceberg and Delta Lake connectors, with unit tests only. hodor disables itself on any other adapter, and on any adapter other than `databricks` when the store is `delta`.
 
 Main target: large scheduled dbt runs on Databricks that rebuild every model in scope on every run, even when most inputs have not changed.
 
@@ -357,9 +357,9 @@ The results feed sections 7.1, 7.3 and 9.2 before the engine is built.
 ## 13. Packaging (uv)
 
 - uv manages the project and builds it. Layout: `uv init --lib` (src layout), build backend `uv_build`, `requires-python = ">=3.10"` (dbt-core 1.12.5 requires 3.10 or newer), development on Python 3.12 to match DBR 18.
-- **Dependencies:** `dbt-core>=1.12,<1.13` and `sqlglot>=30.22,<31`. No adapter is a hard dependency; v1 disables itself on adapters other than databricks and duckdb.
+- **Dependencies:** `dbt-core>=1.12,<1.13` and `sqlglot>=30.22,<31`. No adapter is a hard dependency; hodor disables itself on adapters other than databricks, duckdb and trino.
 - **Extras:** `duckdb` (`duckdb>=1.0`), `postgres` (`psycopg[binary]>=3.2`) and `lakebase` (adds `databricks-sdk>=0.81` for the Lakebase token).
-- **Dev group:** pytest, ruff, duckdb, dbt-duckdb (local warehouse for end-to-end tests), and `dbt-databricks==1.12.7` (to test against the real adapter code).
+- **Dev group:** pytest, ruff, duckdb, dbt-duckdb (local warehouse for end-to-end tests), `dbt-databricks==1.12.7` and `dbt-trino==1.10.6` (to test against the real adapter code).
 - **Console script:** `dbt-hodor = dbt_hodor.cli:main`.
 - **Build:** `uv build` makes the wheel and the sdist. Both install paths are supported and documented:
   - a wheel in a UC volume, uploaded with `databricks fs cp`, and installed by jobs with `libraries: - whl: /Volumes/<catalog>/<schema>/<volume>/dbt_hodor-<version>-py3-none-any.whl`;

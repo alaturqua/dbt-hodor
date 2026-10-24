@@ -7,7 +7,7 @@ hodor loads inside the dbt process. A Databricks `dbt_task` job needs every comm
 
 ## Steps
 
-1. **Plugin start.** With mode `off`, or for any command other than `run`, `build`, `test`, `seed` or `snapshot`, hodor installs nothing. If upstream `dbt_state` is also installed, hodor turns itself off with a warning, because both patch the same methods. On any adapter other than `databricks` or `duckdb`, hodor is off with a warning.
+1. **Plugin start.** With mode `off`, or for any command other than `run`, `build`, `test`, `seed` or `snapshot`, hodor installs nothing. If upstream `dbt_state` is also installed, hodor turns itself off with a warning, because both patch the same methods. On any adapter other than `databricks`, `duckdb` or `trino`, hodor is off with a warning. It is also off with a warning when the `delta` store is set on an adapter other than `databricks`.
 2. **Run start.** hodor opens the store and loads the latest record of every node in one query. It reads the warehouse clock in epoch milliseconds, so `lag_tolerance` does not depend on the local clock. It reads data versions in parallel, on `hodor_metadata_threads` threads.
 3. **Each model.** dbt has already compiled the node. hodor builds the node facts and calls the engine.
     - Reuse (mode `on`): hodor returns dbt's `Reused` status without calling the materialization. Hooks do not run unless `execute_hooks_on_any_reuse` is `true`.

@@ -22,6 +22,18 @@ Unknown operations count as changes on purpose. A new Delta operation name can c
 
     Checks on a Unity Catalog workspace confirmed the rules above. Zero-row WRITE, MERGE, UPDATE and DELETE commits show all row metrics at 0. A `CREATE OR REPLACE TABLE AS SELECT` or `INSERT OVERWRITE` that writes 0 rows shows `numOutputRows` at 0 and `numRemovedFiles` above 0. `COMMENT ON TABLE` is recorded as `SET TBLPROPERTIES`, a column comment as `CHANGE COLUMN`. ANALYZE writes no commit. `DESCRIBE HISTORY` on a view fails, so a view used as a source counts as unknown. `information_schema.tables.last_altered` does not move on data writes, so hodor reads the history of every table. Delta paths on Volumes were not tested.
 
+## Trino (Iceberg and Delta Lake connectors)
+
+hodor runs `select * from "<catalog>"."<schema>"."<table>$history"` and reads the columns it gets back. This is covered by unit tests only.
+
+- **Iceberg** (columns `made_current_at`, `snapshot_id` and `is_current_ancestor`): the token is the `snapshot_id` and the `made_current_at` time of the row with the latest `made_current_at` among the rows where `is_current_ancestor` is true, for example `4521@1792465200000`. hodor does not take the newest committed snapshot. A rollback adds no row: it sets `is_current_ancestor` to false on the rolled-back snapshots, so the token moves back to an older snapshot and changes. A history without a current-ancestor row is unknown.
+- **Delta Lake** (columns `version`, `timestamp` and `operation`): the same rules as Delta on Databricks apply, including the list of operations that never count. The Trino history has no `operationMetrics`, so every operation outside that list counts as a data change.
+- **Other connectors**: Hive, memory and the rest have no `$history` table. The query fails, the table is unknown, and every node that depends on it builds. A table whose history is empty or has other columns is unknown too.
+
+A view is hashed from its definition in `<catalog>.information_schema.views`.
+
+Limit: hodor reads the whole `$history` table of each relevant table, not a window of 20 commits. The Trino adapter needs the state store to be `duckdb` or `postgres`.
+
 ## DuckDB (content fingerprint)
 
 DuckDB has no table history. The token is the row count plus an order-independent sum of row hashes, computed with one query per table. That is fine for local test data sizes.

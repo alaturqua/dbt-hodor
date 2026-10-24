@@ -153,7 +153,7 @@ The state table decides what gets skipped in prod. Grant `MODIFY` on it only to 
 
 ## Scope of v1
 
-Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular), on `dbt-databricks` 1.12.7 and `dbt-duckdb`, with dbt-core 1.12.x.
+Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular), on `dbt-databricks` 1.12.7, `dbt-duckdb` and `dbt-trino` 1.10.6, with dbt-core 1.12.x. Trino support covers the Iceberg and Delta Lake connectors and is covered by unit tests only.
 
 Model versions: each version is its own node with its own table and records. Moving `latest_version` rebuilds the models that `ref()` it.
 
