@@ -387,3 +387,21 @@ def test_dbt_threads_do_not_change_decisions(project, monkeypatch, threads):
         "not_null_fct_orders_id": ("build", "new_upstream_data"),
         "rpt_orders": ("build", "new_upstream_data"),
     }
+
+
+def test_standalone_dbt_test_runs_with_hodor_active(project):
+    root, _, state = project
+    build(root)
+    before = len(records(state))
+
+    res = invoke(root, "test")  # no EMPTY flag on dbt test: hodor must not stand aside
+    assert res.success, res.exception
+    assert not unpatched()
+    replayed = [
+        r
+        for r in res.result.results
+        if (r.adapter_response or {}).get("_message", "").startswith("dbt-hodor: replayed")
+    ]
+    assert [r.node.name for r in replayed] == ["not_null_fct_orders_id"]
+    new = records(state)[before:]
+    assert ("not_null_fct_orders_id", "reuse", "no_new_data", "reuse", "pass") in new
