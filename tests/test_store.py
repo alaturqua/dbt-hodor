@@ -299,3 +299,30 @@ def test_trino_store_reads_with_trino_literals(record):
     assert sqlglot.parse_one(select, read="trino").find(exp.Window) is not None
     assert store.invocation("proj", "prod", None) == [record()]
     assert 'FROM "c"."s"."hodor_state"' in warehouse.statements[-1]
+
+
+class InsertFails(FakeWarehouse):
+    """Creating and reading work; every INSERT raises, like a commit conflict."""
+
+    def __call__(self, sql):
+        if sql.startswith("INSERT"):
+            self.statements.append(sql)
+            raise RuntimeError("commit conflict")
+        return super().__call__(sql)
+
+
+@pytest.mark.parametrize("store_class", [DeltaStore, TrinoStore])
+def test_failed_insert_is_a_store_error_and_leaves_no_history(store_class, record):
+    from dbt_hodor.config import NodeStateConfig
+    from dbt_hodor.engine import BUILD, NodeFacts, decide
+
+    warehouse = InsertFails()
+    store = store_class("c", "s", "hodor_state", warehouse, batch_size=2)
+    with pytest.raises(StoreError, match="cannot write hodor state: commit conflict"):
+        store.append([record(record_id="1"), record(record_id="2"), record(record_id="3")])
+    assert sum(s.startswith("INSERT") for s in warehouse.statements) == 1  # stops at the first
+    # nothing was stored, so the next run finds no record and builds the node
+    last = store.load("proj", "prod", 0).get("c.s.fct")
+    facts = NodeFacts(kind="table", code_hash="h", config_hash="c", hash_version="1")
+    decision = decide(facts, last, NodeStateConfig(), 1_000_000)
+    assert (decision.action, decision.reason) == (BUILD, "no_history")

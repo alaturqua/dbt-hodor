@@ -1,9 +1,12 @@
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 from dbt_hodor import providers, runtime
 from dbt_hodor.runtime import model_kind, seed_hash
+from dbt_hodor.store.delta import DeltaStore
+from dbt_hodor.store.trino import TrinoStore
 
 
 def node(language="sql", **config):
@@ -136,3 +139,20 @@ def test_unset_store_on_duckdb_stays_off(monkeypatch):
     result, created, _ = _create(monkeypatch, "duckdb", database="c", schema="s")
     assert result is None
     assert created == []
+
+
+@pytest.mark.parametrize("store_class", [DeltaStore, TrinoStore])
+def test_failed_store_write_warns_and_does_not_raise(monkeypatch, store_class, record):
+    def execute(sql):
+        if sql.startswith("INSERT"):
+            raise RuntimeError("commit conflict")
+        return []
+
+    warnings = []
+    monkeypatch.setattr(runtime, "warn", warnings.append)
+    instance = object.__new__(runtime.Runtime)
+    instance.store = store_class("c", "s", "hodor_state", execute)
+    instance._lock = threading.Lock()
+    instance._warned = set()
+    instance._write([record(record_id="1"), record(record_id="2")])  # must not raise
+    assert warnings == ["dbt-hodor: cannot write hodor state: commit conflict; 2 records lost"]
