@@ -225,10 +225,12 @@ class TrinoProvider(Provider):
         entries = [dict(zip(names, row, strict=True)) for row in rows]
         if not entries:
             raise LookupError("empty metadata log")
-        last = max(entries, key=lambda e: _history_ms(e["timestamp"]))
-        file_id = hashlib.sha256(str(last["file"]).encode("utf-8")).hexdigest()[:12]
-        token = f"{current.pop()}@{latest}+{_history_ms(last['timestamp'])}:{file_id}"
-        return DataVersion(token, latest)
+        logged = max(_history_ms(e["timestamp"]) for e in entries)
+        files = {str(e["file"]) for e in entries if _history_ms(e["timestamp"]) == logged}
+        if len(files) != 1:
+            raise LookupError("several metadata files with the same time")
+        file_id = hashlib.sha256(files.pop().encode("utf-8")).hexdigest()[:12]
+        return DataVersion(f"{current.pop()}@{latest}+{logged}:{file_id}", max(latest, logged))
 
     def _history(self, key: str) -> DataVersion:
         names, rows = fetch(self._adapter, f"select * from {self._system_table(key, '$history')}")

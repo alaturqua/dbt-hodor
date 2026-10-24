@@ -184,7 +184,7 @@ def test_trino_iceberg_uses_the_latest_current_ancestor():
     )
     version = TrinoProvider(adapter).version('cat.sch.odd"name')
     assert version.token.startswith("22@1792472400000+1792479600000:")
-    assert version.changed_at_ms == 1792472400000
+    assert version.changed_at_ms == 1792479600000  # the metadata log entry at 07:00
     assert adapter.queries == [
         'select * from "cat"."sch"."odd""name$history"',
         'select * from "cat"."sch"."odd""name$metadata_log_entries"',
@@ -231,6 +231,24 @@ def test_trino_iceberg_schema_change_moves_the_token():
     a = TrinoProvider(FakeAdapter(iceberg(row, log=[(*before, 11, 0, 1)]))).version("c.s.t")
     b = TrinoProvider(FakeAdapter(iceberg(row, log=[(*before, 11, 0, 1), (*after, 11, 1, 1)])))
     assert a.token != b.version("c.s.t").token
+
+
+@pytest.mark.parametrize("order", [1, -1])
+def test_trino_iceberg_tied_metadata_log_entries_give_unknown(order):
+    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
+    t = datetime(2026, 10, 20, 7, tzinfo=UTC)
+    log = [(t, "local:///t/a.metadata.json", 11, 0, 1), (t, "local:///t/b.metadata.json", 11, 1, 1)]
+    provider = TrinoProvider(FakeAdapter(iceberg(row, log=log[::order])))
+    assert provider.version("c.s.t") == UNKNOWN
+
+
+def test_trino_iceberg_changed_at_is_the_latest_of_snapshot_and_metadata_commit():
+    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
+    # LOG_ENTRY is at 07:00, after the snapshot at 03:00
+    assert TrinoProvider(FakeAdapter(iceberg(row))).version("c.s.t").changed_at_ms == 1792479600000
+    early = (datetime(2026, 10, 20, 2, tzinfo=UTC), "local:///t/a.metadata.json", 11, 0, 1)
+    version = TrinoProvider(FakeAdapter(iceberg(row, log=[early]))).version("c.s.t")
+    assert version.changed_at_ms == 1792465200000
 
 
 def test_trino_iceberg_empty_metadata_log_gives_unknown():

@@ -103,7 +103,6 @@ def project(tmp_path, monkeypatch):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(body).strip() + "\n", encoding="utf-8")
     schema = f"hodor_{uuid.uuid4().hex[:12]}"
-    execute(f"create schema {CATALOG}.{schema} with (location = 'local:///{schema}')")
     state = tmp_path / "state.duckdb"
     monkeypatch.setenv("HODOR_TEST_TRINO_HOST", HOST)
     monkeypatch.setenv("HODOR_TEST_TRINO_PORT", str(PORT))
@@ -112,12 +111,14 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("HODOR_MODE", "on")
     monkeypatch.setenv("DBT_SEND_ANONYMOUS_USAGE_STATS", "false")
     try:
+        execute(f"create schema {CATALOG}.{schema} with (location = 'local:///{schema}')")
         execute(f"create table {CATALOG}.{schema}.raw_orders as select 1 as id, 10 as amount")
         yield root, schema, state
     finally:
-        execute(f"drop view if exists {CATALOG}.{schema}.v_orders")
-        for (table,) in execute(f"show tables from {CATALOG}.{schema}"):
-            execute(f"drop table if exists {CATALOG}.{schema}.{table}")
+        if execute(f"show schemas from {CATALOG} like '{schema}'"):
+            execute(f"drop view if exists {CATALOG}.{schema}.v_orders")
+            for (table,) in execute(f"show tables from {CATALOG}.{schema}"):
+                execute(f"drop table if exists {CATALOG}.{schema}.{table}")
         execute(f"drop schema if exists {CATALOG}.{schema}")
 
 
