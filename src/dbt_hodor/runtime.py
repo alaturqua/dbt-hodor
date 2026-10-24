@@ -312,6 +312,11 @@ class Runtime:
         if settings.mode == "off":
             info("dbt-hodor is off")
             return None
+        if getattr(get_flags(), "EMPTY", False):
+            # --empty builds zero-row tables and seeds; a record of that would let a later
+            # normal run reuse them
+            info("dbt-hodor is off for this --empty run")
+            return None
         adapter_type = adapter.type()
         if adapter_type not in SUPPORTED_ADAPTERS:
             warn(f"dbt-hodor is off: adapter {adapter_type!r} is not supported")
