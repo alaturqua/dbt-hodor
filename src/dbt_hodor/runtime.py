@@ -46,12 +46,13 @@ from dbt_hodor.providers import (
     DeltaProvider,
     DuckDBProvider,
     Provider,
+    TrinoProvider,
     store_executor,
 )
 from dbt_hodor.records import Record
 from dbt_hodor.store import StateStore, StoreError
 
-SUPPORTED_ADAPTERS = ("databricks", "duckdb")
+PROVIDERS = {"databricks": DeltaProvider, "duckdb": DuckDBProvider, "trino": TrinoProvider}
 # None is the adapter default (merge on dbt-databricks).
 SUPPORTED_STRATEGIES = (
     None,
@@ -206,6 +207,21 @@ def open_store(
     )
 
 
+def provider_class_for(adapter_type: str, store: str) -> type[Provider] | None:
+    """The provider for this adapter, or None (with a warning) when hodor must be off."""
+    provider_class = PROVIDERS.get(adapter_type)
+    if provider_class is None:
+        warn(f"dbt-hodor is off: adapter {adapter_type!r} is not supported")
+        return None
+    if store == "delta" and adapter_type != "databricks":
+        warn(
+            f"dbt-hodor is off: store 'delta' needs the databricks adapter, not "
+            f"{adapter_type!r}; set hodor_store to duckdb or postgres"
+        )
+        return None
+    return provider_class
+
+
 def _view_hash(analysis: SqlAnalysis) -> str:
     """The hash names no relations, but a view keeps the names it reads."""
     reads = "|".join(sorted(analysis.tables))
@@ -241,7 +257,7 @@ class Runtime:
         self.project_name = config.project_name
         self.target_name = config.target_name
         self.adapter = adapter
-        self.dialect = adapter.type()  # sqlglot dialect names match: duckdb, databricks
+        self.dialect = adapter.type()  # sqlglot dialect names match: databricks, duckdb, trino
         self.manifest = manifest
         self.store = store
         self.provider = provider
@@ -317,11 +333,10 @@ class Runtime:
             # normal run reuse them
             info("dbt-hodor is off for this --empty run")
             return None
-        adapter_type = adapter.type()
-        if adapter_type not in SUPPORTED_ADAPTERS:
-            warn(f"dbt-hodor is off: adapter {adapter_type!r} is not supported")
+        provider_class = provider_class_for(adapter.type(), settings.store)
+        if provider_class is None:
             return None
-        provider = (DuckDBProvider if adapter_type == "duckdb" else DeltaProvider)(adapter, debug)
+        provider = provider_class(adapter, debug)
         try:
             store = open_store(settings, config, adapter)
         except StoreError as exc:

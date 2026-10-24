@@ -285,6 +285,15 @@ def test_config_hash_sees_model_level_constraints():
             set(),
         ),
         ("select current_timestamp as ts from c.s.t", "duckdb", set(), {"always"}),
+        # trino
+        ("select a from c.s.t", "trino", set(), set()),
+        ("select a, current_timestamp as ts from c.s.t", "trino", set(), {"always"}),
+        ("select a, now() as ts from c.s.t", "trino", set(), {"always"}),
+        ("select a, current_date as d from c.s.t", "trino", set(), {"date"}),
+        ("select a from c.s.t where d > current_date - interval '7' day", "trino", {"date"}, set()),
+        ("select a from c.s.t where random() < 0.1", "trino", {"always"}, set()),
+        ("select a from c.s.t where uuid() is not null", "trino", {"always"}, set()),
+        ("select a from c.s.t where u = current_user", "trino", {"session"}, set()),
     ],
 )
 def test_volatile_classes(sql, dialect, logic, stamps):

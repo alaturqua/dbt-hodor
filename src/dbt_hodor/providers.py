@@ -14,6 +14,7 @@ from dbt_hodor.metadata import (
     DataVersion,
     delta_data_version,
     duckdb_fingerprint_sql,
+    epoch_ms,
     history_entry_from_row,
 )
 
@@ -108,6 +109,16 @@ class Provider:
     def path_version(self, path: str) -> DataVersion:
         return UNKNOWN
 
+    def _view(self, key: str, quote: str) -> DataVersion:
+        catalog, schema, name = key[len(VIEW_PREFIX) :].split(".")
+        _, rows = fetch(
+            self._adapter,
+            f"select view_definition from {_quote(catalog, quote)}.information_schema.views "
+            f"where lower(table_schema) = {_literal(schema)} "
+            f"and lower(table_name) = {_literal(name)}",
+        )
+        return _definition(rows)
+
     def now_ms(self) -> int:
         _, rows = fetch(self._adapter, self.clock_sql)
         return int(rows[0][0])
@@ -159,20 +170,78 @@ class DeltaProvider(Provider):
 
     def _query(self, key: str) -> DataVersion:
         if key.startswith(VIEW_PREFIX):
-            catalog, schema, name = key[len(VIEW_PREFIX) :].split(".")
-            _, rows = fetch(
-                self._adapter,
-                f"select view_definition from {_quote(catalog, '`')}.information_schema.views "
-                f"where lower(table_schema) = {_literal(schema)} "
-                f"and lower(table_name) = {_literal(name)}",
-            )
-            return _definition(rows)
+            return self._view(key, "`")
         if key.startswith("delta:"):
             return self._history("delta." + _quote(key[len("delta:") :], "`"))
         return self._history(_quote(key, "`"))
 
     def path_version(self, path: str) -> DataVersion:
         return self.version(f"delta:{path}")
+
+
+def _history_ms(value: Any) -> int:
+    """Epoch milliseconds from a driver datetime (naive means UTC)."""
+    ms = epoch_ms(value)
+    if ms is None:
+        raise LookupError(f"unreadable history time {value!r}")
+    return ms
+
+
+def _latest(records: Sequence[dict[str, Any]], time: str, ident: str) -> tuple[int, Any]:
+    """The newest record's time and id; several ids at that time cannot be ordered."""
+    stamped = [(_history_ms(r[time]), r[ident]) for r in records]
+    if not stamped:
+        raise LookupError(f"no {ident} to read")
+    latest = max(ms for ms, _ in stamped)
+    ids = {i for ms, i in stamped if ms == latest}
+    if len(ids) != 1:
+        raise LookupError(f"several {ident} values at the same {time}")
+    return latest, ids.pop()
+
+
+class TrinoProvider(Provider):
+    """Iceberg and Delta Lake connectors, through their hidden "$history" tables.
+
+    Other connectors have no such table: the query fails and the node builds.
+    """
+
+    clock_sql = "select cast(to_unixtime(current_timestamp) * 1000 as bigint)"
+    volatile_sql = (
+        "select cast(current_date as varchar), current_user, current_catalog,"
+        " current_schema, current_timezone(), version()"
+    )
+
+    def _metadata_log(self, key: str) -> tuple[int, str]:
+        # A schema change adds no snapshot but writes a new metadata file, which the log lists.
+        table = _quote(key + "$metadata_log_entries", '"')
+        names, rows = fetch(self._adapter, f"select * from {table}")
+        entries = [dict(zip(names, row, strict=True)) for row in rows]
+        logged, file = _latest(entries, "timestamp", "file")
+        return logged, hashlib.sha256(str(file).encode("utf-8")).hexdigest()[:12]
+
+    def _iceberg(self, key: str, records: list[dict[str, Any]]) -> DataVersion:
+        # A rollback adds no row: it clears is_current_ancestor on the rolled-back snapshots.
+        ancestors = [r for r in records if r["is_current_ancestor"] is True]
+        latest, snapshot = _latest(ancestors, "made_current_at", "snapshot_id")
+        logged, file_id = self._metadata_log(key)
+        return DataVersion(f"{snapshot}@{latest}+{logged}:{file_id}", max(latest, logged))
+
+    def _history(self, key: str) -> DataVersion:
+        table = _quote(key + "$history", '"')
+        names, rows = fetch(self._adapter, f"select * from {table}")
+        if not rows:
+            raise LookupError("empty history")
+        records = [dict(zip(names, row, strict=True)) for row in rows]
+        if {"made_current_at", "snapshot_id", "is_current_ancestor"} <= set(names):
+            return self._iceberg(key, records)
+        if {"version", "timestamp", "operation"} <= set(names):
+            return delta_data_version(history_entry_from_row(r) for r in records)
+        raise LookupError(f"unknown history columns {names}")
+
+    def _query(self, key: str) -> DataVersion:
+        if key.startswith(VIEW_PREFIX):
+            return self._view(key, '"')
+        return self._history(key)
 
 
 def store_executor(adapter: Any) -> Callable[[str], Sequence[Sequence[object]]]:

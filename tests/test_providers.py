@@ -1,9 +1,17 @@
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
+
+import pytest
 
 from dbt_hodor.metadata import UNKNOWN, DataVersion
-from dbt_hodor.providers import DeltaProvider, DuckDBProvider, fetch, store_executor
+from dbt_hodor.providers import (
+    DeltaProvider,
+    DuckDBProvider,
+    TrinoProvider,
+    fetch,
+    store_executor,
+)
 
 
 class FakeCursor:
@@ -137,3 +145,172 @@ def test_clock_and_store_executor():
     assert DeltaProvider(adapter).now_ms() == 1_760_000_000_000
     assert adapter.queries == ["select unix_millis(current_timestamp())"]
     assert store_executor(adapter)("select 1") == [(1_760_000_000_000,)]
+
+
+UTC = timezone.utc
+ICEBERG = ["made_current_at", "snapshot_id", "parent_id", "is_current_ancestor"]
+
+
+LOG = ["timestamp", "file", "latest_snapshot_id", "latest_schema_id", "latest_sequence_number"]
+LOG_ENTRY = (
+    datetime(2026, 10, 20, 7, tzinfo=UTC),
+    "local:///t/metadata/00001.metadata.json",
+    1,
+    0,
+    1,
+)
+
+
+def iceberg(*rows, log=(LOG_ENTRY,)):
+    def answer(sql):
+        if "$metadata_log_entries" in sql:
+            return LOG, list(log)
+        return ICEBERG, list(rows)
+
+    return answer
+
+
+def fail(sql):
+    raise RuntimeError("Table 'c.s.t$history' does not exist")
+
+
+def test_trino_iceberg_uses_the_latest_current_ancestor():
+    adapter = FakeAdapter(
+        iceberg(
+            (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True),
+            (datetime(2026, 10, 20, 5, tzinfo=UTC), 22, 11, True),
+            (datetime(2026, 10, 20, 6, tzinfo=UTC), 33, 22, False),
+        )
+    )
+    version = TrinoProvider(adapter).version('cat.sch.odd"name')
+    assert version.token.startswith("22@1792472400000+1792479600000:")
+    assert version.changed_at_ms == 1792479600000  # the metadata log entry at 07:00
+    assert adapter.queries == [
+        'select * from "cat"."sch"."odd""name$history"',
+        'select * from "cat"."sch"."odd""name$metadata_log_entries"',
+    ]
+
+
+def test_trino_iceberg_rollback_changes_the_token():
+    t1, t2 = datetime(2026, 10, 20, 3, tzinfo=UTC), datetime(2026, 10, 20, 4, tzinfo=UTC)
+    first, second = 3848394183711388191, 6535619552822973486
+    before = iceberg((t1, first, None, True), (t2, second, first, True))
+    # a rollback adds no row: it clears is_current_ancestor on the rolled-back snapshot
+    after = iceberg((t1, first, None, True), (t2, second, first, False))
+    a = TrinoProvider(FakeAdapter(before)).version("c.s.t")
+    b = TrinoProvider(FakeAdapter(after)).version("c.s.t")
+    assert a.token.startswith(f"{second}@1792468800000+")
+    assert b.token.startswith(f"{first}@1792465200000+")
+    assert a.token != b.token
+
+
+def test_trino_iceberg_reads_naive_times_as_utc():
+    naive = TrinoProvider(FakeAdapter(iceberg((datetime(2026, 10, 20, 3), 11, None, True))))
+    aware = TrinoProvider(
+        FakeAdapter(iceberg((datetime(2026, 10, 20, 3, tzinfo=UTC), 11, 0, True)))
+    )
+    assert naive.version("c.s.t") == aware.version("c.s.t")
+
+
+def test_trino_iceberg_schema_change_moves_the_token():
+    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
+    before = (datetime(2026, 10, 20, 7, tzinfo=UTC), "local:///t/metadata/00001.metadata.json")
+    after = (datetime(2026, 10, 20, 8, tzinfo=UTC), "local:///t/metadata/00002.metadata.json")
+    # ALTER TABLE ADD COLUMN adds no snapshot, only a metadata log entry
+    a = TrinoProvider(FakeAdapter(iceberg(row, log=[(*before, 11, 0, 1)]))).version("c.s.t")
+    b = TrinoProvider(FakeAdapter(iceberg(row, log=[(*before, 11, 0, 1), (*after, 11, 1, 1)])))
+    assert a.token != b.version("c.s.t").token
+
+
+def test_trino_iceberg_changed_at_is_the_latest_of_snapshot_and_metadata_commit():
+    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
+    # LOG_ENTRY is at 07:00, after the snapshot at 03:00
+    assert TrinoProvider(FakeAdapter(iceberg(row))).version("c.s.t").changed_at_ms == 1792479600000
+    early = (datetime(2026, 10, 20, 2, tzinfo=UTC), "local:///t/a.metadata.json", 11, 0, 1)
+    version = TrinoProvider(FakeAdapter(iceberg(row, log=[early]))).version("c.s.t")
+    assert version.changed_at_ms == 1792465200000
+
+
+def test_trino_delta_connector_history():
+    def delta(sql):
+        return ["version", "timestamp", "user_id", "operation"], [
+            (9, datetime(2026, 10, 20, 4, tzinfo=UTC), "u", "OPTIMIZE"),
+            (8, datetime(2026, 10, 20, 3, tzinfo=UTC), "u", "MERGE"),
+        ]
+
+    # no operationMetrics column: a data operation counts as a change, OPTIMIZE does not
+    version = TrinoProvider(FakeAdapter(delta)).version("c.s.t")
+    assert version == DataVersion("8@1792465200000", 1792465200000)
+
+
+T3 = datetime(2026, 10, 20, 3, tzinfo=UTC)
+T7 = datetime(2026, 10, 20, 7, tzinfo=UTC)
+TIED_FILES = [
+    (T7, "local:///t/a.metadata.json", 11, 0, 1),
+    (T7, "local:///t/b.metadata.json", 11, 1, 1),
+]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        lambda sql: (ICEBERG, []),
+        lambda sql: (ICEBERG, [(1792465200000, 11, None, False)]),
+        lambda sql: (["version", "timestamp", "operation"], []),
+        lambda sql: (["something", "else"], [(1, 2)]),
+        lambda sql: (ICEBERG, [("not a time", 1, None, True)]),
+        lambda sql: (ICEBERG, [(None, 1, None, True)]),
+        iceberg((1792465200000, 11, None, True)),
+        iceberg((T3, 11, None, True), (T3, 22, 11, True)),
+        iceberg((T3, 22, 11, True), (T3, 11, None, True)),
+        iceberg((T3, 11, None, True), log=TIED_FILES),
+        iceberg((T3, 11, None, True), log=TIED_FILES[::-1]),
+        iceberg((T3, 11, None, True), log=()),
+        fail,
+    ],
+    ids=[
+        "empty-iceberg",
+        "no-current-snapshot",
+        "empty-delta",
+        "unknown-columns",
+        "bad-time",
+        "null-time",
+        "epoch-number-time",
+        "tied-snapshots",
+        "tied-snapshots-reversed",
+        "tied-log-files",
+        "tied-log-files-reversed",
+        "empty-metadata-log",
+        "query-error",
+    ],
+)
+def test_trino_history_problems_give_unknown(answer):
+    messages = []
+    provider = TrinoProvider(FakeAdapter(answer), messages.append)
+    assert provider.version("c.s.t") == UNKNOWN
+    assert messages
+
+
+def test_trino_view_version_hashes_the_definition():
+    adapter = FakeAdapter(lambda sql: (["view_definition"], [("SELECT 1",)]))
+    version = TrinoProvider(adapter).version("view:Cat.Sch.V")
+    assert version.known
+    assert adapter.queries == [
+        'select view_definition from "Cat".information_schema.views '
+        "where lower(table_schema) = 'Sch' and lower(table_name) = 'V'"
+    ]
+    changed = TrinoProvider(FakeAdapter(lambda sql: (["view_definition"], [("SELECT 2",)])))
+    assert changed.version("view:Cat.Sch.V") != version
+    missing = TrinoProvider(FakeAdapter(lambda sql: (["view_definition"], [])))
+    assert missing.version("view:Cat.Sch.V") == UNKNOWN
+
+
+def test_trino_clock_and_session_values():
+    adapter = FakeAdapter(lambda sql: (["x"], [(1_760_000_000_000,)]))
+    assert TrinoProvider(adapter).now_ms() == 1_760_000_000_000
+    assert adapter.queries == ["select cast(to_unixtime(current_timestamp) * 1000 as bigint)"]
+    values = FakeAdapter(lambda sql: (["x"], [("2026-10-20", "u", "cat", "sch", "UTC", "450")]))
+    assert TrinoProvider(values).volatile_values() == {
+        "date": "2026-10-20",
+        "session": "u|cat|sch|UTC|450",
+    }

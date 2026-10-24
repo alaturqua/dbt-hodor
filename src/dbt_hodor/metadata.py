@@ -81,7 +81,7 @@ def _metrics(raw: object) -> Mapping[str, object]:
         return {}
 
 
-def _epoch_ms(value: object) -> int | None:
+def epoch_ms(value: object) -> int | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)  # Delta history times are UTC
@@ -93,7 +93,7 @@ def history_entry_from_row(row: Mapping[str, object]) -> HistoryEntry:
     """One `DESCRIBE HISTORY` row, with operationMetrics as a dict, JSON text or pairs."""
     return HistoryEntry(
         version=int(row["version"]),  # type: ignore[call-overload]
-        timestamp_ms=_epoch_ms(row.get("timestamp")),
+        timestamp_ms=epoch_ms(row.get("timestamp")),
         operation=str(row.get("operation") or ""),
         metrics=_metrics(row.get("operationMetrics")),
     )

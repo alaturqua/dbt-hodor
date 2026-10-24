@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dbt_hodor import runtime
+from dbt_hodor import providers, runtime
 from dbt_hodor.runtime import Runtime, model_kind, seed_hash
 
 
@@ -54,6 +54,37 @@ def test_seed_hash_ignores_line_endings_and_sees_content(tmp_path):
     assert seed_hash(seed) != lf
 
 
+@pytest.mark.parametrize(
+    ("adapter_type", "store", "expected"),
+    [
+        ("databricks", "delta", providers.DeltaProvider),
+        ("databricks", "duckdb", providers.DeltaProvider),
+        ("duckdb", "duckdb", providers.DuckDBProvider),
+        ("trino", "duckdb", providers.TrinoProvider),
+        ("duckdb", "delta", None),
+        ("trino", "delta", None),
+        ("snowflake", "duckdb", None),
+    ],
+)
+def test_provider_class_for_adapter_and_store(adapter_type, store, expected):
+    assert runtime.provider_class_for(adapter_type, store) is expected
+
+
+def test_create_returns_none_before_opening_the_store_for_a_disallowed_pair(monkeypatch):
+    def no_store(*args, **kwargs):
+        raise AssertionError("open_store must not be called")
+
+    warnings = []
+    profile = {"hodor_store": "delta", "hodor_database": "c", "hodor_schema": "s"}
+    monkeypatch.setattr(runtime, "_profile_settings", lambda config: profile)
+    monkeypatch.setattr(runtime, "open_store", no_store)
+    monkeypatch.setattr(runtime, "warn", warnings.append)
+    adapter = SimpleNamespace(type=lambda: "trino")
+    assert runtime.Runtime.create(None, adapter, None, "inv") is None
+    assert len(warnings) == 1
+    assert "store 'delta' needs the databricks adapter" in warnings[0]
+
+
 def _create(monkeypatch, flags):
     """Runtime.create with settings in mode on, flags as given, and a store that opens or raises."""
     opened = []
@@ -63,21 +94,25 @@ def _create(monkeypatch, flags):
         raise runtime.StoreError("stop here")  # fail open after the EMPTY check
 
     monkeypatch.setattr(runtime, "_profile_settings", lambda config: {})
-    monkeypatch.setattr(runtime, "load_settings", lambda *a: SimpleNamespace(mode="on"))
+    monkeypatch.setattr(
+        runtime, "load_settings", lambda *a, **k: SimpleNamespace(mode="on", store="duckdb")
+    )
     monkeypatch.setattr(runtime, "get_flags", lambda: flags)
     monkeypatch.setattr(runtime, "open_store", open_store)
-    monkeypatch.setattr(runtime, "DuckDBProvider", lambda *a: SimpleNamespace())
+    monkeypatch.setattr(runtime, "provider_class_for", lambda *a: lambda *b: SimpleNamespace())
     adapter = SimpleNamespace(type=lambda: "duckdb")
     return Runtime.create(SimpleNamespace(), adapter, None, "id"), opened
 
 
 def test_empty_run_turns_hodor_off_before_any_store_or_provider(monkeypatch):
     monkeypatch.setattr(
-        runtime, "DuckDBProvider", lambda *a: pytest.fail("provider must not be built")
+        runtime, "provider_class_for", lambda *a: pytest.fail("provider must not be built")
     )
     monkeypatch.setattr(runtime, "open_store", lambda *a: pytest.fail("store must not be opened"))
     monkeypatch.setattr(runtime, "_profile_settings", lambda config: {})
-    monkeypatch.setattr(runtime, "load_settings", lambda *a: SimpleNamespace(mode="on"))
+    monkeypatch.setattr(
+        runtime, "load_settings", lambda *a, **k: SimpleNamespace(mode="on", store="duckdb")
+    )
     monkeypatch.setattr(runtime, "get_flags", lambda: SimpleNamespace(EMPTY=True))
     adapter = SimpleNamespace(type=lambda: "duckdb")
     assert Runtime.create(SimpleNamespace(), adapter, None, "id") is None

@@ -771,7 +771,7 @@ svg.door { width:100%; max-height:250px; }
   <div class="note"><b>Early development.</b> The engine and stores pass end-to-end tests on dbt-duckdb and a live test on Databricks. Not yet proven in a large production project.</div>
 
   <h3 id="d-what">What it is</h3>
-  <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, and dbt-duckdb for local development and tests.</p>
+  <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, dbt-trino 1.10.6 (Iceberg and Delta Lake connectors; Delta Lake connector: unit tests only), and dbt-duckdb for local development and tests.</p>
 
   <h3 id="d-install">Install</h3>
   <p>Install dbt-hodor from PyPI in the environment where dbt runs. dbt loads any installed module named <code>dbt_*</code> that has a <code>plugins</code> list, so there is nothing to configure in dbt.</p>
@@ -1077,7 +1077,7 @@ Run again with --yes to delete them.</code></pre>
     { id: 'first', t: 'First node: load state', s: '1 query for records, 1 for the clock', d: 'Before the first node runs, one query loads the latest successful build record of every selected node. One more query reads the warehouse clock. Table metadata is prefetched.', y: 142, h: 52 },
     { id: 'hash', t: 'Hash compiled SQL', s: 'sqlglot, or the fast path', d: 'The compiled SQL is normalized and hashed, so case, quoting, comments and table aliases are not changes. Fast path: if the SQL text equals the last build, the stored analysis is used and sqlglot does not run.', y: 228, h: 44, loop: true },
     { id: 'cfg', t: 'Compare config', s: 'config hash vs record', d: 'The node config is hashed too. Keys that do not change the data (tags, meta, docs, state, and similar) are left out.', y: 288, h: 44, loop: true },
-    { id: 'up', t: 'Read upstream versions', s: 'data version per upstream table', d: 'Each upstream table gets a data version: from Delta history on Databricks, from a content fingerprint on DuckDB. Results are cached for the run.', y: 348, h: 44, loop: true },
+    { id: 'up', t: 'Read upstream versions', s: 'data version per upstream table', d: 'Each upstream table gets a data version: from Delta history on Databricks, from the $history table on Trino (Iceberg and Delta Lake connectors), from a content fingerprint on DuckDB. Results are cached for the run.', y: 348, h: 44, loop: true },
     { id: 'decide', t: 'Engine decides', s: 'first matching rule wins', d: 'A pure function takes the node facts, the latest record and the upstream versions. It returns REUSE or BUILD with a reason code (tab 5).', y: 408, h: 44, loop: true },
     { id: 'reuse', t: 'REUSE', s: 'skip the build', d: 'The node returns a Reused result and the materialization never runs. Hooks do not run unless execute_hooks_on_any_reuse is true. Children are not skipped.', x: 40, w: 132, y: 482, h: 44, loop: true, cls: 'reu' },
     { id: 'build', t: 'BUILD', s: 'run as plain dbt', d: 'The original dbt code runs. Then hodor reads the new data version of the table and updates the run cache, so downstream nodes see it. In shadow mode every node ends here.', x: 188, w: 132, y: 482, h: 44, loop: true, cls: 'bld' },
