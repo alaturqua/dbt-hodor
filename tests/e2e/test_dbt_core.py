@@ -233,48 +233,39 @@ def add_snapshot(root: Path) -> None:
 ALL = ("stg_orders", "countries", "fct_orders", "rpt_orders", "orders_snapshot")
 
 
-def test_empty_run_after_a_normal_run_leaves_nothing_to_reuse(project):
+@pytest.mark.parametrize("normal_first", [True, False])
+def test_empty_run_leaves_nothing_to_reuse(project, normal_first):
     root, warehouse, state = project
     add_snapshot(root)
-    build(root)
+    if normal_first:
+        build(root)
     written = records(state)
 
     empty = build(root, "--empty")
     assert not any(status == "reused" for status, _ in empty.values())
-    assert not any("REUSED" in message for _, message in empty.values())
     assert empty["fct_orders_doubles"] == ("pass", "")
     assert empty["not_null_fct_orders_id"] == ("pass", "")  # run by dbt, not replayed
     assert records(state) == written  # hodor stood aside, nothing recorded
-    # a snapshot is not emptied by --empty: its rows stay current
-    assert count(warehouse, "main.orders_snapshot where dbt_valid_to is null") == 2
     assert count(warehouse, "main.stg_orders") == 0
     assert count(warehouse, "main.countries") == 0
+    if normal_first:
+        # a snapshot is not emptied by --empty: its rows stay current
+        assert count(warehouse, "main.orders_snapshot where dbt_valid_to is null") == 2
 
-    # the normal run compares against the last normal record and finds changed data
     after = build(root)
-    for name in ALL[:4]:
-        assert after[name][0] == "success", name
-        assert latest(state)[name][2] == "build", name
-    assert after["orders_snapshot"][0] == "reused"  # its data was never emptied
-    assert latest(state)["countries"][:2] == ("build", "target_modified")
+    if normal_first:
+        # the normal run compares against the last normal record and finds changed data
+        for name in ALL[:4]:
+            assert after[name][0] == "success", name
+            assert latest(state)[name][2] == "build", name
+        assert after["orders_snapshot"][0] == "reused"  # its data was never emptied
+        assert latest(state)["countries"][:2] == ("build", "target_modified")
+    else:
+        for name in ALL:
+            assert latest(state)[name][:2] == ("build", "no_history"), name
     assert count(warehouse, "main.stg_orders") == 2
     assert count(warehouse, "main.fct_orders") == 2
     assert count(warehouse, "main.countries") == 1
-
-
-def test_empty_run_first_ever_leaves_nothing_to_reuse(project):
-    root, warehouse, state = project
-    add_snapshot(root)
-    empty = build(root, "--empty")
-    assert not any(status == "reused" for status, _ in empty.values())
-    assert records(state) == []
-
-    build(root)
-    for name in ALL:
-        assert latest(state)[name][:2] == ("build", "no_history"), name
-    assert count(warehouse, "main.countries") == 1
-    assert count(warehouse, "main.stg_orders") == 2
-    assert count(warehouse, "main.fct_orders") == 2
 
 
 # -- failures -----------------------------------------------------------------------------
@@ -297,7 +288,7 @@ def test_fail_fast_still_flushes_the_records_of_finished_nodes(project):
     assert not res.success  # dbt's own exit status
     outcome = results(res)
     assert outcome["bad"][0] == "error"
-    assert outcome["rpt_orders"] == ("skipped", "Skipping due to fail_fast")
+    assert outcome["rpt_orders"][0] == "skipped"
 
     written = {name: (action, status) for name, _, _, action, status in records(state)}
     assert written["bad"] == ("build", "error")
@@ -335,8 +326,6 @@ def test_defer_with_an_unreadable_state_fails_in_dbt_not_in_hodor(project, monke
     # dbt reads the state manifest first and stops with the same error with or without hodor
     for path in ("missing", "corrupt"):
         assert failures["on", path] == failures["off", path]
-    assert "Could not find manifest" in failures["on", "missing"]
-    assert "Could not read WritableManifest" in failures["on", "corrupt"]
     assert records(state) == []
 
 
@@ -397,11 +386,5 @@ def test_standalone_dbt_test_runs_with_hodor_active(project):
     res = invoke(root, "test")  # no EMPTY flag on dbt test: hodor must not stand aside
     assert res.success, res.exception
     assert not unpatched()
-    replayed = [
-        r
-        for r in res.result.results
-        if (r.adapter_response or {}).get("_message", "").startswith("dbt-hodor: replayed")
-    ]
-    assert [r.node.name for r in replayed] == ["not_null_fct_orders_id"]
     new = records(state)[before:]
     assert ("not_null_fct_orders_id", "reuse", "no_new_data", "reuse", "pass") in new

@@ -315,7 +315,7 @@ class Runtime:
         if getattr(get_flags(), "EMPTY", False):
             # --empty builds zero-row tables and seeds; a record of that would let a later
             # normal run reuse them
-            info("dbt-hodor stands aside for --empty runs")
+            info("dbt-hodor is off for this --empty run")
             return None
         adapter_type = adapter.type()
         if adapter_type not in SUPPORTED_ADAPTERS:
