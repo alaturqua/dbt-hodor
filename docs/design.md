@@ -276,7 +276,7 @@ Set as keys on the active `profiles.yml` target. An environment variable of the 
 | Profile key | Env var | Default | Values |
 | --- | --- | --- | --- |
 | hodor_mode | HODOR_MODE | `shadow` | `off`, `shadow`, `on` |
-| hodor_store | HODOR_STORE | `delta` | `delta`, `duckdb` |
+| hodor_store | HODOR_STORE | `trino` on the `trino` adapter, `delta` otherwise | `delta`, `duckdb`, `postgres`, `trino` |
 | hodor_database | HODOR_DATABASE | the target's `catalog` (or `database`), for `delta` only | Databricks catalog, or Postgres database (required, no default: it is unrelated to the dbt target); not used by `duckdb` |
 | hodor_schema | HODOR_SCHEMA | none for `delta` (required); `main` for `duckdb` | schema name |
 | hodor_table | HODOR_TABLE | `hodor_state` | table name |

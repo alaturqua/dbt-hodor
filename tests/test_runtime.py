@@ -1,9 +1,12 @@
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 from dbt_hodor import providers, runtime
 from dbt_hodor.runtime import model_kind, seed_hash
+from dbt_hodor.store.delta import DeltaStore
+from dbt_hodor.store.trino import TrinoStore
 
 
 def node(language="sql", **config):
@@ -56,6 +59,7 @@ def test_seed_hash_ignores_line_endings_and_sees_content(tmp_path):
 
 def _create(monkeypatch, adapter_type, **profile):
     created = []
+    stores = []
 
     def init(self, invocation_id, settings, config, adapter, manifest, store, provider, state):
         created.append(provider)
@@ -63,11 +67,13 @@ def _create(monkeypatch, adapter_type, **profile):
     monkeypatch.setattr(
         runtime, "_profile_settings", lambda config: {f"hodor_{k}": v for k, v in profile.items()}
     )
-    monkeypatch.setattr(runtime, "open_store", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        runtime, "open_store", lambda settings, *args, **kwargs: stores.append(settings.store)
+    )
     monkeypatch.setattr(runtime.Runtime, "__init__", init)
     adapter = SimpleNamespace(type=lambda: adapter_type)
     result = runtime.Runtime.create(None, adapter, None, "inv")
-    return result, created
+    return result, created, stores
 
 
 @pytest.mark.parametrize(
@@ -79,25 +85,74 @@ def _create(monkeypatch, adapter_type, **profile):
     ],
 )
 def test_each_supported_adapter_gets_its_provider(monkeypatch, adapter_type, provider_class):
-    result, created = _create(monkeypatch, adapter_type, store="duckdb", path=":memory:")
+    result, created, _ = _create(monkeypatch, adapter_type, store="duckdb", path=":memory:")
     assert result is not None
     assert type(created[0]) is provider_class
 
 
 def test_unsupported_adapter_turns_hodor_off(monkeypatch):
-    result, created = _create(monkeypatch, "snowflake", store="duckdb", path=":memory:")
+    result, created, _ = _create(monkeypatch, "snowflake", store="duckdb", path=":memory:")
     assert result is None
     assert created == []
 
 
 @pytest.mark.parametrize("adapter_type", ["duckdb", "trino"])
 def test_delta_store_needs_the_databricks_adapter(monkeypatch, adapter_type):
-    result, created = _create(monkeypatch, adapter_type, store="delta", database="c", schema="s")
+    result, created, _ = _create(monkeypatch, adapter_type, store="delta", database="c", schema="s")
     assert result is None
     assert created == []
 
 
 def test_delta_store_is_allowed_on_databricks(monkeypatch):
-    result, created = _create(monkeypatch, "databricks", store="delta", database="c", schema="s")
+    result, created, _ = _create(monkeypatch, "databricks", store="delta", database="c", schema="s")
     assert result is not None
     assert type(created[0]) is providers.DeltaProvider
+
+
+def test_trino_store_needs_the_trino_adapter(monkeypatch):
+    for adapter_type in ("databricks", "duckdb"):
+        result, created, _ = _create(
+            monkeypatch, adapter_type, store="trino", database="c", schema="s"
+        )
+        assert result is None
+        assert created == []
+    result, created, stores = _create(monkeypatch, "trino", store="trino", database="c", schema="s")
+    assert result is not None
+    assert type(created[0]) is providers.TrinoProvider
+    assert stores == ["trino"]
+
+
+@pytest.mark.parametrize(("adapter_type", "store"), [("trino", "trino"), ("databricks", "delta")])
+def test_unset_store_follows_the_adapter(monkeypatch, adapter_type, store):
+    result, _, stores = _create(monkeypatch, adapter_type, database="c", schema="s")
+    assert result is not None
+    assert stores == [store]
+
+
+def test_explicit_store_wins_over_the_adapter_default(monkeypatch):
+    result, _, stores = _create(monkeypatch, "trino", store="duckdb", path=":memory:")
+    assert result is not None
+    assert stores == ["duckdb"]
+
+
+def test_unset_store_on_duckdb_stays_off(monkeypatch):
+    result, created, _ = _create(monkeypatch, "duckdb", database="c", schema="s")
+    assert result is None
+    assert created == []
+
+
+@pytest.mark.parametrize("store_class", [DeltaStore, TrinoStore])
+def test_failed_store_write_warns_and_does_not_raise(monkeypatch, store_class, record):
+    def execute(sql):
+        if sql.startswith("INSERT"):
+            raise RuntimeError("commit conflict")
+        return []
+
+    warnings = []
+    monkeypatch.setattr(runtime, "warn", warnings.append)
+    instance = object.__new__(runtime.Runtime)
+    instance.store = store_class("c", "s", "hodor_state", execute)
+    instance._lock = threading.Lock()
+    instance._warned = set()
+    instance._write([record(record_id="1"), record(record_id="2")])  # must not raise
+    assert warnings == ["dbt-hodor: cannot write hodor state: commit conflict; 2 records lost"]

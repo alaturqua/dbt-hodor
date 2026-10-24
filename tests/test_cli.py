@@ -28,3 +28,12 @@ def test_prune_rejects_negative_days():
     # -1 would move the cutoff into the future and delete today's records
     with pytest.raises(SystemExit):
         main(["prune", "--keep-days", "-1", "--yes"])
+
+
+def test_ddl_trino(capsys):
+    assert main(["ddl", "--store", "trino", "--database", "iceberg", "--schema", "ops"]) == 0
+    out = capsys.readouterr().out
+    assert 'CREATE TABLE IF NOT EXISTS "iceberg"."ops"."hodor_state"' in out
+    assert "record_id varchar" in out
+    with pytest.raises(SystemExit):
+        main(["ddl", "--store", "trino", "--schema", "ops"])

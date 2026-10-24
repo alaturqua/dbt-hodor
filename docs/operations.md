@@ -61,6 +61,15 @@ dbt-hodor prune --keep-days 30 --yes # delete anything older than 30 days
 
 Records of other projects and targets in the same table are never touched. Keeping fewer days than `hodor_lookback_days` deletes records the next run still needs, so those nodes build once with `no_history`. The dry run warns when that would happen. On Delta, run `VACUUM` yourself afterwards if you want the files reclaimed.
 
+On the `trino` store with an Iceberg catalog, every insert and every delete makes a snapshot, and old snapshots and small files stay until you remove them. Run this now and then, for example weekly, as a user that may alter the table:
+
+```sql
+ALTER TABLE iceberg.ops.hodor_state EXECUTE optimize;
+ALTER TABLE iceberg.ops.hodor_state EXECUTE expire_snapshots(retention_threshold => '7d');
+```
+
+hodor does not run these. A Delta Lake catalog has its own `optimize` and `vacuum` procedures.
+
 ## Fail open
 
 Every failure leads to a build, never to a reuse. hodor never fails a dbt run.

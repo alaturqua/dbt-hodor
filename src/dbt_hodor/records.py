@@ -39,6 +39,7 @@ TYPE_NAMES = {
     "delta": {"text": "STRING", "bigint": "BIGINT"},
     "duckdb": {"text": "VARCHAR", "bigint": "BIGINT"},
     "postgres": {"text": "TEXT", "bigint": "BIGINT"},
+    "trino": {"text": "varchar", "bigint": "bigint"},
 }
 SUCCESS_STATUSES = ("success", "pass", "warn", "fail")
 _JSON_FIELDS = ("sql_facts", "upstreams", "test_result")
