@@ -82,6 +82,7 @@ Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
 - **First incremental run.** The first incremental run after a full build compiles different SQL (the `is_incremental()` branch), so it builds once more.
 - **CTE renames** count as code changes and cause one extra build.
 - **Untraceable inputs.** `read_files(...)`, other table functions and non-Delta sources are unknown, so their dependents always build.
+- **`--empty` runs.** dbt-hodor stands aside for the whole run: dbt builds every node as usual and nothing is recorded. An empty run loads seeds and tables with zero rows, and a record of it could let a later normal run reuse them. The next normal run compares against the last normal record and builds the nodes whose data changed.
 - **DuckDB state file.** One process at a time.
 - **Databricks.** Not yet run in a large production project. Delta paths on Volumes are not tested.
 

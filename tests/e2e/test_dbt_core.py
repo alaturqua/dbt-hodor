@@ -221,36 +221,60 @@ def test_unit_tests_always_run_and_are_not_recorded(project):
 # -- --empty ------------------------------------------------------------------------------
 
 
-def test_empty_models_rebuild_when_the_next_run_is_not_empty(project):
-    root, warehouse, state = project
-    build(root, "--empty")
-    assert count(warehouse, "main.stg_orders") == 0
+def add_snapshot(root: Path) -> None:
+    (root / "snapshots").mkdir()
+    (root / "snapshots" / "orders_snapshot.yml").write_text(
+        "snapshots: [{name: orders_snapshot, relation: \"source('raw', 'orders')\", "
+        "config: {unique_key: id, strategy: check, check_cols: all}}]",
+        encoding="utf-8",
+    )
 
-    # --empty puts a limit 0 into ref() and source(), so the compiled SQL differs
+
+ALL = ("stg_orders", "countries", "fct_orders", "rpt_orders", "orders_snapshot")
+
+
+def test_empty_run_after_a_normal_run_leaves_nothing_to_reuse(project):
+    root, warehouse, state = project
+    add_snapshot(root)
     build(root)
-    now = latest(state)
-    assert now["stg_orders"] == ("build", "code_changed", "build")
-    assert now["fct_orders"] == ("build", "code_changed", "build")
+    written = records(state)
+
+    empty = build(root, "--empty")
+    assert not any(status == "reused" for status, _ in empty.values())
+    assert not any("REUSED" in message for _, message in empty.values())
+    assert empty["fct_orders_doubles"] == ("pass", "")
+    assert empty["not_null_fct_orders_id"] == ("pass", "")  # run by dbt, not replayed
+    assert records(state) == written  # hodor stood aside, nothing recorded
+    # a snapshot is not emptied by --empty: its rows stay current
+    assert count(warehouse, "main.orders_snapshot where dbt_valid_to is null") == 2
+    assert count(warehouse, "main.stg_orders") == 0
+    assert count(warehouse, "main.countries") == 0
+
+    # the normal run compares against the last normal record and finds changed data
+    after = build(root)
+    for name in ALL[:4]:
+        assert after[name][0] == "success", name
+        assert latest(state)[name][2] == "build", name
+    assert after["orders_snapshot"][0] == "reused"  # its data was never emptied
+    assert latest(state)["countries"][:2] == ("build", "target_modified")
     assert count(warehouse, "main.stg_orders") == 2
     assert count(warehouse, "main.fct_orders") == 2
-
-    # and back: an empty run after a full one rebuilds too
-    build(root, "--empty")
-    assert latest(state)["stg_orders"] == ("build", "code_changed", "build")
-    assert count(warehouse, "main.stg_orders") == 0
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="WRONG REUSE: dbt seed --empty loads 0 rows, the CSV hash is unchanged, so the "
-    "next normal run reuses the empty seed",
-)
-def test_empty_seed_is_not_reused_by_a_normal_run(project):
-    root, warehouse, _ = project
-    build(root, "--empty")
-    assert count(warehouse, "main.countries") == 0
-    build(root)
     assert count(warehouse, "main.countries") == 1
+
+
+def test_empty_run_first_ever_leaves_nothing_to_reuse(project):
+    root, warehouse, state = project
+    add_snapshot(root)
+    empty = build(root, "--empty")
+    assert not any(status == "reused" for status, _ in empty.values())
+    assert records(state) == []
+
+    build(root)
+    for name in ALL:
+        assert latest(state)[name][:2] == ("build", "no_history"), name
+    assert count(warehouse, "main.countries") == 1
+    assert count(warehouse, "main.stg_orders") == 2
+    assert count(warehouse, "main.fct_orders") == 2
 
 
 # -- failures -----------------------------------------------------------------------------
