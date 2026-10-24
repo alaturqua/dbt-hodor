@@ -183,6 +183,7 @@ def test_trino_iceberg_uses_the_latest_current_ancestor():
         )
     )
     version = TrinoProvider(adapter).version('cat.sch.odd"name')
+    assert version.token.startswith("22@1792472400000+1792479600000:")
     assert version.changed_at_ms == 1792479600000  # the metadata log entry at 07:00
     assert adapter.queries == [
         'select * from "cat"."sch"."odd""name$history"',
@@ -198,6 +199,8 @@ def test_trino_iceberg_rollback_changes_the_token():
     after = iceberg((t1, first, None, True), (t2, second, first, False))
     a = TrinoProvider(FakeAdapter(before)).version("c.s.t")
     b = TrinoProvider(FakeAdapter(after)).version("c.s.t")
+    assert a.token.startswith(f"{second}@1792468800000+")
+    assert b.token.startswith(f"{first}@1792465200000+")
     assert a.token != b.token
 
 
@@ -257,6 +260,7 @@ TIED_FILES = [
         lambda sql: (["something", "else"], [(1, 2)]),
         lambda sql: (ICEBERG, [("not a time", 1, None, True)]),
         lambda sql: (ICEBERG, [(None, 1, None, True)]),
+        iceberg((1792465200000, 11, None, True)),
         iceberg((T3, 11, None, True), (T3, 22, 11, True)),
         iceberg((T3, 22, 11, True), (T3, 11, None, True)),
         iceberg((T3, 11, None, True), log=TIED_FILES),
@@ -271,6 +275,7 @@ TIED_FILES = [
         "unknown-columns",
         "bad-time",
         "null-time",
+        "epoch-number-time",
         "tied-snapshots",
         "tied-snapshots-reversed",
         "tied-log-files",

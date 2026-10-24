@@ -68,3 +68,18 @@ def test_seed_hash_ignores_line_endings_and_sees_content(tmp_path):
 )
 def test_provider_class_for_adapter_and_store(adapter_type, store, expected):
     assert runtime.provider_class_for(adapter_type, store) is expected
+
+
+def test_create_returns_none_before_opening_the_store_for_a_disallowed_pair(monkeypatch):
+    def no_store(*args, **kwargs):
+        raise AssertionError("open_store must not be called")
+
+    warnings = []
+    profile = {"hodor_store": "delta", "hodor_database": "c", "hodor_schema": "s"}
+    monkeypatch.setattr(runtime, "_profile_settings", lambda config: profile)
+    monkeypatch.setattr(runtime, "open_store", no_store)
+    monkeypatch.setattr(runtime, "warn", warnings.append)
+    adapter = SimpleNamespace(type=lambda: "trino")
+    assert runtime.Runtime.create(None, adapter, None, "inv") is None
+    assert len(warnings) == 1
+    assert "store 'delta' needs the databricks adapter" in warnings[0]

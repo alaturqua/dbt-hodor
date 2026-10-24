@@ -14,7 +14,7 @@ Requirements:
 - Stores state in a Delta table (default on Databricks), in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 - Uses the dbt State model configs (`state:` block), so projects can switch between the two.
 - Works in Databricks `dbt_task` jobs. Every command in a `dbt_task` must start with `dbt` (`databricks/sdk/service/jobs.py:1562`), so a wrapper CLI is not an option. hodor must load inside the dbt process.
-- Supported adapters: `databricks` for real environments, and `duckdb` (dbt-duckdb) for local development and tests. Local work runs end to end on DuckDB, with no Databricks access. `trino` (dbt-trino) is supported for the Iceberg and Delta Lake connectors. hodor disables itself on any other adapter, and on any adapter other than `databricks` when the store is `delta`.
+- Supported adapters: `databricks` for real environments, and `duckdb` (dbt-duckdb) for local development and tests. Local work runs end to end on DuckDB, with no Databricks access. `trino` (dbt-trino) is supported for the Iceberg and Delta Lake connectors (Delta Lake connector: unit tests only). hodor disables itself on any other adapter, and on any adapter other than `databricks` when the store is `delta`.
 
 Main target: large scheduled dbt runs on Databricks that rebuild every model in scope on every run, even when most inputs have not changed.
 
