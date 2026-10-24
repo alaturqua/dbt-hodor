@@ -84,6 +84,10 @@ FILES = {
         {{ config(materialized='table') }}
         select id, amount * 2 as amount2 from {{ ref('stg_orders') }}
     """,
+    "models/all_orders.sql": """
+        {{ config(materialized='table') }}
+        select * from {{ source('raw', 'raw_orders') }}
+    """,
     "models/v_orders.sql": """
         {{ config(materialized='view') }}
         select id, amount2 from {{ ref('fct_orders') }}
@@ -175,3 +179,11 @@ def test_iceberg_lifecycle(project):
     third = dbt(root)
     assert third["v_orders"][0] == "success"
     assert decisions(state)["v_orders"] == ("build", "code_changed")
+
+    # 6. a schema change adds no snapshot but still counts as new data for a select *
+    execute(f"alter table {raw} add column note varchar")
+    dbt(root)
+    assert decisions(state)["all_orders"] == ("build", "new_upstream_data")
+    columns = execute(f"show columns from {CATALOG}.{schema}.all_orders")
+    assert [c[0] for c in columns] == ["id", "amount", "note"]
+    assert dbt(root)["all_orders"] == ("reused", "REUSED (no_new_data)")

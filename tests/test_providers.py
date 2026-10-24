@@ -151,8 +151,23 @@ UTC = timezone.utc
 ICEBERG = ["made_current_at", "snapshot_id", "parent_id", "is_current_ancestor"]
 
 
-def iceberg(*rows):
-    return lambda sql: (ICEBERG, list(rows))
+LOG = ["timestamp", "file", "latest_snapshot_id", "latest_schema_id", "latest_sequence_number"]
+LOG_ENTRY = (
+    datetime(2026, 10, 20, 7, tzinfo=UTC),
+    "local:///t/metadata/00001.metadata.json",
+    1,
+    0,
+    1,
+)
+
+
+def iceberg(*rows, log=(LOG_ENTRY,)):
+    def answer(sql):
+        if "$metadata_log_entries" in sql:
+            return LOG, list(log)
+        return ICEBERG, list(rows)
+
+    return answer
 
 
 def fail(sql):
@@ -168,8 +183,12 @@ def test_trino_iceberg_uses_the_latest_current_ancestor():
         )
     )
     version = TrinoProvider(adapter).version('cat.sch.odd"name')
-    assert version == DataVersion("22@1792472400000", 1792472400000)
-    assert adapter.queries == ['select * from "cat"."sch"."odd""name$history"']
+    assert version.token.startswith("22@1792472400000+1792479600000:")
+    assert version.changed_at_ms == 1792472400000
+    assert adapter.queries == [
+        'select * from "cat"."sch"."odd""name$history"',
+        'select * from "cat"."sch"."odd""name$metadata_log_entries"',
+    ]
 
 
 def test_trino_iceberg_rollback_changes_the_token():
@@ -180,8 +199,9 @@ def test_trino_iceberg_rollback_changes_the_token():
     after = iceberg((t1, first, None, True), (t2, second, first, False))
     a = TrinoProvider(FakeAdapter(before)).version("c.s.t")
     b = TrinoProvider(FakeAdapter(after)).version("c.s.t")
-    assert a.token == f"{second}@1792468800000"
-    assert b.token == f"{first}@1792465200000"
+    assert a.token.startswith(f"{second}@1792468800000+")
+    assert b.token.startswith(f"{first}@1792465200000+")
+    assert a.token != b.token
 
 
 def test_trino_iceberg_reads_naive_times_as_utc_and_epoch_numbers():
@@ -190,8 +210,32 @@ def test_trino_iceberg_reads_naive_times_as_utc_and_epoch_numbers():
         FakeAdapter(iceberg((datetime(2026, 10, 20, 3, tzinfo=UTC), 11, 0, True)))
     )
     number = TrinoProvider(FakeAdapter(iceberg((1792465200000, 11, None, True))))
-    expected = DataVersion("11@1792465200000", 1792465200000)
-    assert naive.version("c.s.t") == aware.version("c.s.t") == number.version("c.s.t") == expected
+    versions = [p.version("c.s.t") for p in (naive, aware, number)]
+    assert versions[0] == versions[1] == versions[2]
+    assert versions[0].token.startswith("11@1792465200000+")
+
+
+@pytest.mark.parametrize("order", [1, -1])
+def test_trino_iceberg_tied_current_snapshots_give_unknown(order):
+    t = datetime(2026, 10, 20, 3, tzinfo=UTC)
+    rows = [(t, 11, None, True), (t, 22, 11, True)][::order]
+    provider = TrinoProvider(FakeAdapter(iceberg(*rows)))
+    assert provider.version("c.s.t") == UNKNOWN
+
+
+def test_trino_iceberg_schema_change_moves_the_token():
+    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
+    before = (datetime(2026, 10, 20, 7, tzinfo=UTC), "local:///t/metadata/00001.metadata.json")
+    after = (datetime(2026, 10, 20, 8, tzinfo=UTC), "local:///t/metadata/00002.metadata.json")
+    # ALTER TABLE ADD COLUMN adds no snapshot, only a metadata log entry
+    a = TrinoProvider(FakeAdapter(iceberg(row, log=[(*before, 11, 0, 1)]))).version("c.s.t")
+    b = TrinoProvider(FakeAdapter(iceberg(row, log=[(*before, 11, 0, 1), (*after, 11, 1, 1)])))
+    assert a.token != b.version("c.s.t").token
+
+
+def test_trino_iceberg_empty_metadata_log_gives_unknown():
+    row = (datetime(2026, 10, 20, 3, tzinfo=UTC), 11, None, True)
+    assert TrinoProvider(FakeAdapter(iceberg(row, log=()))).version("c.s.t") == UNKNOWN
 
 
 def test_trino_delta_connector_history():

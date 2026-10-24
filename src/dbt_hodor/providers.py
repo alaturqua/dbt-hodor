@@ -202,21 +202,41 @@ class TrinoProvider(Provider):
         " current_schema, current_timezone(), version()"
     )
 
-    def _history(self, key: str) -> DataVersion:
+    @staticmethod
+    def _system_table(key: str, suffix: str) -> str:
         *head, name = key.split(".")
-        history = _quote(".".join(head), '"') + '."' + name.replace('"', '""') + '$history"'
-        names, rows = fetch(self._adapter, f"select * from {history}")
+        return _quote(".".join(head), '"') + '."' + name.replace('"', '""') + suffix + '"'
+
+    def _iceberg(self, key: str, records: list[dict[str, Any]]) -> DataVersion:
+        # A rollback adds no row: it clears is_current_ancestor on the rolled-back snapshots.
+        ancestors = [r for r in records if r["is_current_ancestor"] is True]
+        if not ancestors:
+            raise LookupError("no current snapshot in the history")
+        latest = max(_history_ms(r["made_current_at"]) for r in ancestors)
+        current = {
+            r["snapshot_id"] for r in ancestors if _history_ms(r["made_current_at"]) == latest
+        }
+        if len(current) != 1:
+            raise LookupError("several current snapshots with the same time")
+        # A schema change adds no snapshot but writes a new metadata file, which the log lists.
+        names, rows = fetch(
+            self._adapter, f"select * from {self._system_table(key, '$metadata_log_entries')}"
+        )
+        entries = [dict(zip(names, row, strict=True)) for row in rows]
+        if not entries:
+            raise LookupError("empty metadata log")
+        last = max(entries, key=lambda e: _history_ms(e["timestamp"]))
+        file_id = hashlib.sha256(str(last["file"]).encode("utf-8")).hexdigest()[:12]
+        token = f"{current.pop()}@{latest}+{_history_ms(last['timestamp'])}:{file_id}"
+        return DataVersion(token, latest)
+
+    def _history(self, key: str) -> DataVersion:
+        names, rows = fetch(self._adapter, f"select * from {self._system_table(key, '$history')}")
         if not rows:
             raise LookupError("empty history")
         records = [dict(zip(names, row, strict=True)) for row in rows]
         if {"made_current_at", "snapshot_id", "is_current_ancestor"} <= set(names):
-            # A rollback adds no row: it clears is_current_ancestor on the rolled-back snapshots.
-            ancestors = [r for r in records if r["is_current_ancestor"] is True]
-            if not ancestors:
-                raise LookupError("no current snapshot in the history")
-            current = max(ancestors, key=lambda r: _history_ms(r["made_current_at"]))
-            ms = _history_ms(current["made_current_at"])
-            return DataVersion(f"{current['snapshot_id']}@{ms}", ms)
+            return self._iceberg(key, records)
         if {"version", "timestamp", "operation"} <= set(names):
             return delta_data_version(history_entry_from_row(r) for r in records)
         raise LookupError(f"unknown history columns {names}")
