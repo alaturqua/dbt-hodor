@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from dbt_hodor import providers, runtime
-from dbt_hodor.runtime import model_kind, seed_hash
+from dbt_hodor.runtime import Runtime, model_kind, seed_hash
 
 
 def node(language="sql", **config):
@@ -83,3 +83,43 @@ def test_create_returns_none_before_opening_the_store_for_a_disallowed_pair(monk
     assert runtime.Runtime.create(None, adapter, None, "inv") is None
     assert len(warnings) == 1
     assert "store 'delta' needs the databricks adapter" in warnings[0]
+
+
+def _create(monkeypatch, flags):
+    """Runtime.create with settings in mode on, flags as given, and a store that opens or raises."""
+    opened = []
+
+    def open_store(*args):
+        opened.append(args)
+        raise runtime.StoreError("stop here")  # fail open after the EMPTY check
+
+    monkeypatch.setattr(runtime, "_profile_settings", lambda config: {})
+    monkeypatch.setattr(
+        runtime, "load_settings", lambda *a, **k: SimpleNamespace(mode="on", store="duckdb")
+    )
+    monkeypatch.setattr(runtime, "get_flags", lambda: flags)
+    monkeypatch.setattr(runtime, "open_store", open_store)
+    monkeypatch.setattr(runtime, "provider_class_for", lambda *a: lambda *b: SimpleNamespace())
+    adapter = SimpleNamespace(type=lambda: "duckdb")
+    return Runtime.create(SimpleNamespace(), adapter, None, "id"), opened
+
+
+def test_empty_run_turns_hodor_off_before_any_store_or_provider(monkeypatch):
+    monkeypatch.setattr(
+        runtime, "provider_class_for", lambda *a: pytest.fail("provider must not be built")
+    )
+    monkeypatch.setattr(runtime, "open_store", lambda *a: pytest.fail("store must not be opened"))
+    monkeypatch.setattr(runtime, "_profile_settings", lambda config: {})
+    monkeypatch.setattr(
+        runtime, "load_settings", lambda *a, **k: SimpleNamespace(mode="on", store="duckdb")
+    )
+    monkeypatch.setattr(runtime, "get_flags", lambda: SimpleNamespace(EMPTY=True))
+    adapter = SimpleNamespace(type=lambda: "duckdb")
+    assert Runtime.create(SimpleNamespace(), adapter, None, "id") is None
+
+
+def test_flags_without_empty_still_proceed(monkeypatch):
+    # dbt test has no EMPTY flag: create goes on to open the store
+    created, opened = _create(monkeypatch, SimpleNamespace())
+    assert created is None  # the stub store fails open
+    assert len(opened) == 1

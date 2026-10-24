@@ -4,6 +4,12 @@ What changes for a running project from one release to the next. Each release li
 
 Until 1.0, the settings and the record schema may change in a minor release.
 
+## Unreleased
+
+### Behavior changes
+
+- **`--empty` runs are not recorded.** dbt-hodor is off for the whole run. Before, an `--empty` run wrote build records, and a later normal run could reuse the zero-row tables. If you ran `--empty` on 0.2.0, run `dbt build --full-refresh` once: it builds every node and writes new records. A node that sets `full_refresh: false` is not rebuilt by the flag.
+
 ## 0.2.0
 
 ### Breaking changes
