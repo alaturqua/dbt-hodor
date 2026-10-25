@@ -52,8 +52,10 @@ def _snowflake_literal(value: str) -> str:
 
 
 def _definition(rows: Sequence[Sequence[Any]]) -> DataVersion:
-    if len(rows) != 1 or rows[0][0] is None:
+    if len(rows) != 1:
         raise LookupError(f"{len(rows)} view definitions match")
+    if rows[0][0] is None:
+        raise LookupError("the view definition is not readable")
     return DataVersion(hashlib.sha256(str(rows[0][0]).encode("utf-8")).hexdigest())
 
 

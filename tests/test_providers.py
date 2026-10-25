@@ -473,7 +473,9 @@ def two_views(sql):
     return ["view_definition"], [("select 1",), ("select 2",)]
 
 
-@pytest.mark.parametrize("provider", [SnowflakeProvider, TrinoProvider, DeltaProvider])
+@pytest.mark.parametrize(
+    "provider", [SnowflakeProvider, TrinoProvider, DeltaProvider, DuckDBProvider]
+)
 def test_two_views_matching_one_name_give_unknown(provider):
     # "v" and V differ only in case: hashing one of them could reuse on the wrong definition
     messages = []
