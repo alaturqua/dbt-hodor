@@ -43,7 +43,7 @@ hodor needs Python 3.10 or newer, `dbt-core` 1.12.x and `sqlglot` 30.22 or newer
 
 The wheel is pure Python (`py3-none-any`), so the same file installs on Windows and on Linux job clusters.
 
-The `duckdb` extra adds the `duckdb` package, which the local state store needs. Your adapter is not a dependency of hodor. hodor supports the `databricks`, `duckdb` and `trino` adapters and turns itself off on any other. The `delta` store needs the `databricks` adapter and the `trino` store needs the `trino` adapter; any other pairing turns hodor off with a warning.
+The `duckdb` extra adds the `duckdb` package, which the local state store needs. Your adapter is not a dependency of hodor. hodor supports the `databricks`, `duckdb`, `snowflake` and `trino` adapters and turns itself off on any other. The `delta` store needs the `databricks` adapter and the `trino` store needs the `trino` adapter; any other pairing turns hodor off with a warning.
 
 ## Trino profile
 
@@ -66,6 +66,28 @@ hodor_demo:
 ```
 
 To keep the state in a local DuckDB file instead, set `hodor_store: duckdb` and `hodor_path: .hodor/state.duckdb`.
+
+## Snowflake profile
+
+On the `snowflake` adapter the default store, `delta`, turns hodor off, so set `hodor_store` to `duckdb` or `postgres`. The `snowflake` adapter has no state store of its own yet. A `profiles.yml` entry with key-pair authentication and the state in a local DuckDB file, with placeholder values:
+
+```yaml
+hodor_demo:
+  target: snowflake
+  outputs:
+    snowflake:
+      type: snowflake
+      account: <account_identifier>
+      user: <user>
+      private_key_path: <path/to/private_key.p8>
+      role: <role>
+      warehouse: <warehouse>
+      database: <database>
+      schema: demo
+      threads: 2
+      hodor_store: duckdb
+      hodor_path: .hodor/state.duckdb
+```
 
 ## Local quickstart on DuckDB
 

@@ -38,6 +38,25 @@ A view is hashed from its definition in `<catalog>.information_schema.views`.
 
 Limit: hodor reads the whole `$history` table of each relevant table, not a window of 20 commits. On the Trino adapter the state store can be `trino`, `duckdb` or `postgres`.
 
+## Snowflake
+
+hodor runs two queries per table. The first reads `created` and `last_ddl` from `<database>.information_schema.tables` (base tables only), as nanoseconds since the epoch. The second calls `SYSTEM$LAST_CHANGE_COMMIT_TIME` on the table, addressed by the name Snowflake stores. The token is `<commit>|<created>|<last_ddl>`. Relation keys are lowercase and Snowflake stores unquoted names in uppercase, so hodor finds the table with `lower()` and then quotes the stored name.
+
+What moves each part, checked on Snowflake 10.38 by the live test `test_snowflake_token_moves_on_each_change`:
+
+| Change | commit token | `created` | `last_ddl` |
+| --- | --- | --- | --- |
+| insert, update (even 0 rows), delete, truncate, merge | moves | no | no |
+| `CREATE OR REPLACE TABLE`, CTAS, `SWAP WITH` | moves (a plain `CREATE OR REPLACE` of an empty table goes back to 0) | moves | moves |
+| `ALTER TABLE ADD COLUMN`, `COMMENT` | no | no | moves |
+
+A plain read moves nothing. The live lifecycle test also builds with dbt through insert, `ADD COLUMN` and `CREATE OR REPLACE` (see [Development](../development.md)). A `COMMENT` and a 0-row update move the token, so they cause an extra build, never a wrong reuse.
+
+- **Unknown:** no matching base table, more than one match, a dynamic, hybrid or Iceberg table (the query leaves them out, because their change tokens were not tested), a null or non-integer value, or an error from `SYSTEM$LAST_CHANGE_COMMIT_TIME` (for example a missing table). Dependents build.
+- **Views:** a view is hashed from its definition in `<database>.information_schema.views`. Two views whose names differ only in case give an unknown version, on every adapter.
+- **Not supported:** stages and `@stage` reads are untraceable inputs, so the node builds. The `dynamic_table` materialization is unsupported, so those models always build.
+- **State store:** on the `snowflake` adapter the state store can be `duckdb` or `postgres`. The default, `delta`, turns hodor off.
+
 ## DuckDB (content fingerprint)
 
 DuckDB has no table history. The token is the row count plus an order-independent sum of row hashes, computed with one query per table. That is fine for local test data sizes.

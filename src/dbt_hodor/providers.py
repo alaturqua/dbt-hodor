@@ -46,9 +46,14 @@ def _literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _snowflake_literal(value: str) -> str:
+    """Snowflake reads a backslash in '...' as an escape: double it, then double the quote."""
+    return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
+
+
 def _definition(rows: Sequence[Sequence[Any]]) -> DataVersion:
-    if not rows or rows[0][0] is None:
-        raise LookupError("no view definition")
+    if len(rows) != 1 or rows[0][0] is None:
+        raise LookupError(f"{len(rows)} view definitions match")
     return DataVersion(hashlib.sha256(str(rows[0][0]).encode("utf-8")).hexdigest())
 
 
@@ -109,13 +114,13 @@ class Provider:
     def path_version(self, path: str) -> DataVersion:
         return UNKNOWN
 
-    def _view(self, key: str, quote: str) -> DataVersion:
+    def _view(self, key: str, quote: str, literal: Callable[[str], str] = _literal) -> DataVersion:
         catalog, schema, name = key[len(VIEW_PREFIX) :].split(".")
         _, rows = fetch(
             self._adapter,
             f"select view_definition from {_quote(catalog, quote)}.information_schema.views "
-            f"where lower(table_schema) = {_literal(schema)} "
-            f"and lower(table_name) = {_literal(name)}",
+            f"where lower(table_schema) = {literal(schema)} "
+            f"and lower(table_name) = {literal(name)}",
         )
         return _definition(rows)
 
@@ -242,6 +247,58 @@ class TrinoProvider(Provider):
         if key.startswith(VIEW_PREFIX):
             return self._view(key, '"')
         return self._history(key)
+
+
+def _integer(value: Any, what: str) -> int:
+    """An exact integer from the driver; null, text, floats and booleans are not accepted."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise LookupError(f"{what} is not an integer: {value!r}")
+    return value
+
+
+class SnowflakeProvider(Provider):
+    """Commit token of the table plus its created and last-DDL times.
+
+    SYSTEM$LAST_CHANGE_COMMIT_TIME moves on DML, truncate, merge, replace and swap, but not
+    on ADD COLUMN or COMMENT, and a plain create or replace sends it back to 0. `created`
+    and `last_ddl` cover those cases. Anything missing or unreadable is unknown.
+    """
+
+    clock_sql = "select date_part(epoch_millisecond, current_timestamp())"
+    volatile_sql = (
+        "select cast(current_date() as varchar), current_user(), current_role(),"
+        " current_warehouse()"
+    )
+
+    def _table(self, key: str) -> DataVersion:
+        database, schema, name = key.split(".")
+        catalog = _quote(database.upper(), '"')
+        # Unquoted names are stored in uppercase and relation keys are lowercase, so find
+        # the table by lower() and address it by the name Snowflake stores.
+        _, rows = fetch(
+            self._adapter,
+            "select table_catalog, table_schema, table_name, "
+            "date_part(epoch_nanosecond, created), date_part(epoch_nanosecond, last_ddl) "
+            f"from {catalog}.information_schema.tables "
+            f"where lower(table_schema) = {_snowflake_literal(schema)} "
+            f"and lower(table_name) = {_snowflake_literal(name)} and table_type = 'BASE TABLE' "
+            "and is_dynamic = 'NO' and is_hybrid = 'NO' and is_iceberg = 'NO'",
+        )
+        if len(rows) != 1:
+            raise LookupError(f"{len(rows)} tables match")
+        *stored, created, last_ddl = rows[0]
+        created_ns = _integer(created, "created")
+        last_ddl_ns = _integer(last_ddl, "last_ddl")
+        target = _snowflake_literal(".".join(_quote(str(part), '"') for part in stored))
+        _, rows = fetch(self._adapter, f"select SYSTEM$LAST_CHANGE_COMMIT_TIME({target})")
+        commit = _integer(rows[0][0], "commit time")
+        return DataVersion(f"{commit}|{created_ns}|{last_ddl_ns}")
+
+    def _query(self, key: str) -> DataVersion:
+        if key.startswith(VIEW_PREFIX):
+            database, rest = key[len(VIEW_PREFIX) :].split(".", 1)
+            return self._view(f"{VIEW_PREFIX}{database.upper()}.{rest}", '"', _snowflake_literal)
+        return self._table(key)
 
 
 def store_executor(adapter: Any) -> Callable[[str], Sequence[Sequence[object]]]:

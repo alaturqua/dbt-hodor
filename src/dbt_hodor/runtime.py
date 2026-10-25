@@ -46,13 +46,19 @@ from dbt_hodor.providers import (
     DeltaProvider,
     DuckDBProvider,
     Provider,
+    SnowflakeProvider,
     TrinoProvider,
     store_executor,
 )
 from dbt_hodor.records import Record
 from dbt_hodor.store import StateStore, StoreError
 
-PROVIDERS = {"databricks": DeltaProvider, "duckdb": DuckDBProvider, "trino": TrinoProvider}
+PROVIDERS = {
+    "databricks": DeltaProvider,
+    "duckdb": DuckDBProvider,
+    "snowflake": SnowflakeProvider,
+    "trino": TrinoProvider,
+}
 # None is the adapter default (merge on dbt-databricks).
 SUPPORTED_STRATEGIES = (
     None,
@@ -265,7 +271,7 @@ class Runtime:
         self.project_name = config.project_name
         self.target_name = config.target_name
         self.adapter = adapter
-        self.dialect = adapter.type()  # sqlglot dialect names match: databricks, duckdb, trino
+        self.dialect = adapter.type()  # sqlglot dialect names match the adapter types
         self.manifest = manifest
         self.store = store
         self.provider = provider

@@ -34,6 +34,7 @@ def node(language="sql", **config):
         ({"materialized": "materialized_view"}, "unsupported"),
         ({"materialized": "streaming_table"}, "unsupported"),
         ({"materialized": "metric_view"}, "unsupported"),
+        ({"materialized": "dynamic_table"}, "unsupported"),
         ({"materialized": "ephemeral"}, "unsupported"),
     ],
 )
@@ -89,7 +90,10 @@ def _create_with_profile(monkeypatch, adapter_type, **profile):
         ("trino", "delta", None),
         ("databricks", "trino", None),
         ("duckdb", "trino", None),
-        ("snowflake", "duckdb", None),
+        ("snowflake", "duckdb", providers.SnowflakeProvider),
+        ("snowflake", "delta", None),
+        ("snowflake", "trino", None),
+        ("bigquery", "duckdb", None),
     ],
 )
 def test_provider_class_for_adapter_and_store(adapter_type, store, expected):

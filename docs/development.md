@@ -73,7 +73,7 @@ src/dbt_hodor/
   cli.py         the dbt-hodor command (ddl, explain, prune)
 tests/           unit tests per module
 tests/e2e/       a local dbt project run with dbt-duckdb
-tests/integration/  the opt-in live tests on Databricks and Trino
+tests/integration/  the opt-in live tests on Databricks, Trino and Snowflake
 ```
 
 ## How the plugin loads
@@ -105,6 +105,14 @@ dbt imports every installed top-level module named `dbt_*` that has a `plugins` 
     ```
 
     The mounted directory holds the catalog file `tests/integration/trino_catalog/iceberg.properties`. Before running the test, check that the server answers: `docker exec hodor-trino trino --execute "select 1"`.
+
+- The live test in `tests/integration/test_snowflake.py` runs real dbt-snowflake builds on a Snowflake account with the state in a local DuckDB file: first run builds, second run reuses, a new source row rebuilds the tables while the unchanged view stays reused, a changed view definition rebuilds the view, `ALTER TABLE ... ADD COLUMN` on a source rebuilds a `select *` table, and a `CREATE OR REPLACE` of a source with the same columns and no rows rebuilds downstream. One source has a quoted lowercase name. A second test in the file runs no dbt: it runs insert, delete, a 0-row update, truncate, merge, `ADD COLUMN`, `COMMENT`, `CREATE OR REPLACE`, CTAS and `SWAP WITH` on one table and checks which part of the data version moves, then checks that a missing table is unknown. It uses key-pair authentication. It is marked `snowflake` and skipped by default, and it skips itself unless all of these variables are set: `HODOR_TEST_SNOWFLAKE_ACCOUNT`, `HODOR_TEST_SNOWFLAKE_USER`, `HODOR_TEST_SNOWFLAKE_PRIVATE_KEY_PATH`, `HODOR_TEST_SNOWFLAKE_ROLE`, `HODOR_TEST_SNOWFLAKE_WAREHOUSE`, `HODOR_TEST_SNOWFLAKE_DATABASE` and `HODOR_TEST_SNOWFLAKE_SCHEMA`. The test creates the schema `<HODOR_TEST_SNOWFLAKE_SCHEMA>_<short uuid>` in that database per run and drops it with `CASCADE` at the end. It runs warehouse queries, which use credits.
+
+    ```sh
+    uv run pytest -m snowflake tests/integration
+    ```
+
+    Set the variables from PowerShell, not Git Bash, which rewrites values that look like paths.
 
 - The live test in `tests/e2e/test_postgres_state.py` runs real dbt-duckdb builds with the state in Postgres: first run records, second run reuses, new upstream data rebuilds the table while the unchanged view stays reused, a code change rebuilds. The warehouse stays DuckDB, so it tests the store and the decision path rather than a warehouse. It is marked `postgres` and skipped by default, and it works against Databricks Lakebase or any other Postgres. `HODOR_PG_SCHEMA` is dropped with `CASCADE` at the start and the end, so point it at a schema that holds nothing else.
 
