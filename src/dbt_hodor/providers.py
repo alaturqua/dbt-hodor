@@ -46,9 +46,14 @@ def _literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _snowflake_literal(value: str) -> str:
+    """Snowflake reads a backslash in '...' as an escape: double it, then double the quote."""
+    return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
+
+
 def _definition(rows: Sequence[Sequence[Any]]) -> DataVersion:
-    if not rows or rows[0][0] is None:
-        raise LookupError("no view definition")
+    if len(rows) != 1 or rows[0][0] is None:
+        raise LookupError(f"{len(rows)} view definitions match")
     return DataVersion(hashlib.sha256(str(rows[0][0]).encode("utf-8")).hexdigest())
 
 
@@ -109,13 +114,13 @@ class Provider:
     def path_version(self, path: str) -> DataVersion:
         return UNKNOWN
 
-    def _view(self, key: str, quote: str) -> DataVersion:
+    def _view(self, key: str, quote: str, literal: Callable[[str], str] = _literal) -> DataVersion:
         catalog, schema, name = key[len(VIEW_PREFIX) :].split(".")
         _, rows = fetch(
             self._adapter,
             f"select view_definition from {_quote(catalog, quote)}.information_schema.views "
-            f"where lower(table_schema) = {_literal(schema)} "
-            f"and lower(table_name) = {_literal(name)}",
+            f"where lower(table_schema) = {literal(schema)} "
+            f"and lower(table_name) = {literal(name)}",
         )
         return _definition(rows)
 
@@ -275,15 +280,16 @@ class SnowflakeProvider(Provider):
             "select table_catalog, table_schema, table_name, "
             "date_part(epoch_nanosecond, created), date_part(epoch_nanosecond, last_ddl) "
             f"from {catalog}.information_schema.tables "
-            f"where lower(table_schema) = {_literal(schema)} "
-            f"and lower(table_name) = {_literal(name)} and table_type = 'BASE TABLE'",
+            f"where lower(table_schema) = {_snowflake_literal(schema)} "
+            f"and lower(table_name) = {_snowflake_literal(name)} and table_type = 'BASE TABLE' "
+            "and is_dynamic = 'NO' and is_hybrid = 'NO' and is_iceberg = 'NO'",
         )
         if len(rows) != 1:
             raise LookupError(f"{len(rows)} tables match")
         *stored, created, last_ddl = rows[0]
         created_ns = _integer(created, "created")
         last_ddl_ns = _integer(last_ddl, "last_ddl")
-        target = _literal(".".join(_quote(str(part), '"') for part in stored))
+        target = _snowflake_literal(".".join(_quote(str(part), '"') for part in stored))
         _, rows = fetch(self._adapter, f"select SYSTEM$LAST_CHANGE_COMMIT_TIME({target})")
         commit = _integer(rows[0][0], "commit time")
         return DataVersion(f"{commit}|{created_ns}|{last_ddl_ns}")
@@ -291,7 +297,7 @@ class SnowflakeProvider(Provider):
     def _query(self, key: str) -> DataVersion:
         if key.startswith(VIEW_PREFIX):
             database, rest = key[len(VIEW_PREFIX) :].split(".", 1)
-            return self._view(f"{VIEW_PREFIX}{database.upper()}.{rest}", '"')
+            return self._view(f"{VIEW_PREFIX}{database.upper()}.{rest}", '"', _snowflake_literal)
         return self._table(key)
 
 

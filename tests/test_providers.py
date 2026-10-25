@@ -338,7 +338,8 @@ def test_snowflake_token_joins_commit_created_and_last_ddl():
         "date_part(epoch_nanosecond, created), date_part(epoch_nanosecond, last_ddl) "
         'from "DB".information_schema.tables '
         "where lower(table_schema) = 'sch' and lower(table_name) = 't' "
-        "and table_type = 'BASE TABLE'",
+        "and table_type = 'BASE TABLE' "
+        "and is_dynamic = 'NO' and is_hybrid = 'NO' and is_iceberg = 'NO'",
         'select SYSTEM$LAST_CHANGE_COMMIT_TIME(\'"DB"."SCH"."T"\')',
     ]
 
@@ -427,3 +428,54 @@ def test_snowflake_clock_and_session_values():
 
 def test_snowflake_paths_are_unknown():
     assert SnowflakeProvider(FakeAdapter(snowflake())).path_version("@stage/f") == UNKNOWN
+
+
+def test_snowflake_query_leaves_out_dynamic_hybrid_and_iceberg_tables():
+    adapter = FakeAdapter(snowflake())
+    SnowflakeProvider(adapter).version("db.sch.t")
+    assert adapter.queries[0].endswith(
+        "and table_type = 'BASE TABLE' "
+        "and is_dynamic = 'NO' and is_hybrid = 'NO' and is_iceberg = 'NO'"
+    )
+
+
+BS = chr(92)  # a backslash, which Snowflake reads as an escape inside '...'
+
+
+@pytest.mark.parametrize(
+    ("name", "literal"),
+    [
+        ("o'brien", "'o''brien'"),
+        (f"a{BS}b", f"'a{BS}{BS}b'"),
+        (f"a{BS}'b", f"'a{BS}{BS}''b'"),
+    ],
+    ids=["quote", "backslash", "backslash-quote"],
+)
+def test_snowflake_literals_escape_backslash_and_quote(name, literal):
+    adapter = FakeAdapter(snowflake(info=(name, name, name, 1, 2)))
+    SnowflakeProvider(adapter).version(f"db.{name}.{name}")
+    both = f"lower(table_schema) = {literal} and lower(table_name) = {literal}"
+    assert both in adapter.queries[0]
+    quoted = '"' + name.replace('"', '""') + '"'
+    target = literal_of(f"{quoted}.{quoted}.{quoted}")
+    assert adapter.queries[1] == f"select SYSTEM$LAST_CHANGE_COMMIT_TIME({target})"
+
+    view = FakeAdapter(lambda sql: (["view_definition"], [("select 1",)]))
+    SnowflakeProvider(view).version(f"view:db.{name}.{name}")
+    assert both in view.queries[0]
+
+
+def literal_of(text):
+    return "'" + text.replace(BS, BS + BS).replace("'", "''") + "'"
+
+
+def two_views(sql):
+    return ["view_definition"], [("select 1",), ("select 2",)]
+
+
+@pytest.mark.parametrize("provider", [SnowflakeProvider, TrinoProvider, DeltaProvider])
+def test_two_views_matching_one_name_give_unknown(provider):
+    # "v" and V differ only in case: hashing one of them could reuse on the wrong definition
+    messages = []
+    assert provider(FakeAdapter(two_views), messages.append).version("view:c.s.v") == UNKNOWN
+    assert messages
