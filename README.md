@@ -154,7 +154,7 @@ The state table decides what gets skipped in prod. Grant `MODIFY` on it only to 
 
 ## Scope of v1
 
-Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular), on `dbt-databricks` 1.12.7, `dbt-duckdb` and `dbt-trino` 1.10.6, with dbt-core 1.12.x. Trino support covers the Iceberg and Delta Lake connectors; see [Data versions](docs/how-it-works/data-versions.md#trino-iceberg-and-delta-lake-connectors).
+Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular), on `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](docs/how-it-works/data-versions.md#snowflake)), with dbt-core 1.12.x. Trino support covers the Iceberg and Delta Lake connectors; see [Data versions](docs/how-it-works/data-versions.md#trino-iceberg-and-delta-lake-connectors).
 
 Model versions: each version is its own node with its own table and records. Moving `latest_version` rebuilds the models that `ref()` it.
 
