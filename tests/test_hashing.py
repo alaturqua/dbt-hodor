@@ -348,3 +348,41 @@ def test_code_hash_ignores_the_environment_of_known_relations():
     other = analyze_sql("select a from ci.pr_1_main.u", relations=relations)
     assert prod.code_hash == ci.code_hash != other.code_hash
     assert ci.tables == {"ci.pr_1_main.t"}
+
+
+SNOWFLAKE_BASE = "select a, b from db.sch.t where a > 1 qualify row_number() over (order by a) = 1"
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "SELECT A, B FROM DB.SCH.T WHERE A > 1 QUALIFY ROW_NUMBER() OVER (ORDER BY A) = 1",
+        'select "A", "B" from "DB"."SCH"."T" where a > 1 '
+        "qualify row_number() over (order by a) = 1",
+    ],
+)
+def test_snowflake_code_hash_ignores_identifier_case(variant):
+    base = analyze_sql(SNOWFLAKE_BASE, "snowflake")
+    assert base.code_hash.startswith("qualify:")
+    assert analyze_sql(variant, "snowflake").code_hash == base.code_hash
+    changed = analyze_sql(SNOWFLAKE_BASE.replace("= 1", "= 2"), "snowflake")
+    assert changed.code_hash != base.code_hash
+
+
+def test_snowflake_lateral_flatten_reads_the_base_table():
+    sql = "select t.id, f.value from db.sch.t as t, lateral flatten(input => t.items) as f"
+    analysis = analyze_sql(sql, "snowflake")
+    assert analysis.code_hash.startswith("qualify:")
+    assert analysis.tables == {"db.sch.t"}
+    assert analysis.opaque_inputs is False
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select $1, $2 from @my_stage/path",
+        "select t.$1 from @my_stage (file_format => 'csv') as t",
+    ],
+)
+def test_snowflake_stage_reads_are_opaque(sql):
+    assert analyze_sql(sql, "snowflake").opaque_inputs is True

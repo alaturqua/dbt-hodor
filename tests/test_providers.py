@@ -8,6 +8,7 @@ from dbt_hodor.metadata import UNKNOWN, DataVersion
 from dbt_hodor.providers import (
     DeltaProvider,
     DuckDBProvider,
+    SnowflakeProvider,
     TrinoProvider,
     fetch,
     store_executor,
@@ -314,3 +315,115 @@ def test_trino_clock_and_session_values():
         "date": "2026-10-20",
         "session": "u|cat|sch|UTC|450",
     }
+
+
+def snowflake(info=("DB", "SCH", "T", 100, 200), commit=1792932189385000001, boom=False):
+    """Answers the information_schema query, then the SYSTEM$ call."""
+
+    def answer(sql):
+        if "SYSTEM$LAST_CHANGE_COMMIT_TIME" in sql:
+            if boom:
+                raise RuntimeError("Table does not exist")
+            return ["c"], [(commit,)]
+        return ["a"], [info] if info else []
+
+    return answer
+
+
+def test_snowflake_token_joins_commit_created_and_last_ddl():
+    adapter = FakeAdapter(snowflake())
+    assert SnowflakeProvider(adapter).version("db.sch.t").token == "1792932189385000001|100|200"
+    assert adapter.queries == [
+        "select table_catalog, table_schema, table_name, "
+        "date_part(epoch_nanosecond, created), date_part(epoch_nanosecond, last_ddl) "
+        'from "DB".information_schema.tables '
+        "where lower(table_schema) = 'sch' and lower(table_name) = 't' "
+        "and table_type = 'BASE TABLE'",
+        'select SYSTEM$LAST_CHANGE_COMMIT_TIME(\'"DB"."SCH"."T"\')',
+    ]
+
+
+def test_snowflake_asks_for_the_stored_name_of_the_table():
+    # a quoted lowercase table is found by lower() and then addressed by its stored name
+    adapter = FakeAdapter(snowflake(info=("db", "sch", 'we"ird', 1, 2)))
+    SnowflakeProvider(adapter).version('db.sch.we"ird')
+    assert adapter.queries[1] == ('select SYSTEM$LAST_CHANGE_COMMIT_TIME(\'"db"."sch"."we""ird"\')')
+
+
+def test_snowflake_commit_zero_is_a_known_token():
+    # an empty table: 0 is a real value, and it differs from a table with rows
+    empty = SnowflakeProvider(FakeAdapter(snowflake(commit=0))).version("db.sch.t")
+    assert empty.token == "0|100|200"
+    assert empty != SnowflakeProvider(FakeAdapter(snowflake())).version("db.sch.t")
+
+
+def test_snowflake_each_part_moves_the_token():
+    base = SnowflakeProvider(FakeAdapter(snowflake())).version("db.sch.t")
+    created = SnowflakeProvider(FakeAdapter(snowflake(info=("DB", "SCH", "T", 101, 200))))
+    ddl = SnowflakeProvider(FakeAdapter(snowflake(info=("DB", "SCH", "T", 100, 201))))
+    commit = SnowflakeProvider(FakeAdapter(snowflake(commit=1792932189385000002)))
+    for other in (created, ddl, commit):
+        assert other.version("db.sch.t") != base
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        snowflake(info=None),
+        snowflake(info=("DB", "SCH", "T", None, 200)),
+        snowflake(info=("DB", "SCH", "T", 100, None)),
+        snowflake(commit=None),
+        snowflake(commit="abc"),
+        snowflake(commit=1.5),
+        snowflake(commit=True),
+        snowflake(info=("DB", "SCH", "T", "x", 200)),
+        snowflake(boom=True),
+        lambda sql: (["a"], [("DB", "SCH", "T", 1, 2), ("db", "sch", "t", 1, 2)]),
+    ],
+    ids=[
+        "missing-info-row",
+        "null-created",
+        "null-last-ddl",
+        "null-commit",
+        "text-commit",
+        "float-commit",
+        "bool-commit",
+        "text-created",
+        "system-function-error",
+        "ambiguous-name",
+    ],
+)
+def test_snowflake_problems_give_unknown(answer):
+    messages = []
+    provider = SnowflakeProvider(FakeAdapter(answer), messages.append)
+    assert provider.version("db.sch.t") == UNKNOWN
+    assert messages
+
+
+def test_snowflake_view_version_hashes_the_definition():
+    adapter = FakeAdapter(lambda sql: (["view_definition"], [("create view v as select 1",)]))
+    version = SnowflakeProvider(adapter).version("view:db.sch.v")
+    assert version.known
+    assert adapter.queries == [
+        'select view_definition from "DB".information_schema.views '
+        "where lower(table_schema) = 'sch' and lower(table_name) = 'v'"
+    ]
+    other = FakeAdapter(lambda sql: (["view_definition"], [("create view v as select 2",)]))
+    assert SnowflakeProvider(other).version("view:db.sch.v") != version
+    missing = FakeAdapter(lambda sql: (["view_definition"], []))
+    assert SnowflakeProvider(missing).version("view:db.sch.v") == UNKNOWN
+
+
+def test_snowflake_clock_and_session_values():
+    adapter = FakeAdapter(lambda sql: (["x"], [(1_760_000_000_000,)]))
+    assert SnowflakeProvider(adapter).now_ms() == 1_760_000_000_000
+    assert adapter.queries == ["select date_part(epoch_millisecond, current_timestamp())"]
+    values = FakeAdapter(lambda sql: (["x"], [("2026-10-20", "u", "r", "w")]))
+    assert SnowflakeProvider(values).volatile_values() == {
+        "date": "2026-10-20",
+        "session": "u|r|w",
+    }
+
+
+def test_snowflake_paths_are_unknown():
+    assert SnowflakeProvider(FakeAdapter(snowflake())).path_version("@stage/f") == UNKNOWN

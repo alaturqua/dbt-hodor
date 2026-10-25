@@ -39,12 +39,13 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not benchmark and not databricks and not postgres and not trino'"
+addopts = "-m 'not benchmark and not databricks and not postgres and not trino and not snowflake'"
 markers = [
     "benchmark: performance benchmarks, run with -m benchmark",
     "databricks: live tests against a Databricks workspace, run with -m databricks",
     "postgres: live tests against Postgres or Lakebase, run with -m postgres",
     "trino: live tests against a Trino container, run with -m trino",
+    "snowflake: live tests against a Snowflake account, run with -m snowflake",
 ]
 
 [tool.ruff]
@@ -59,6 +60,7 @@ dev = [
     "dbt-databricks==1.12.7",
     "dbt-duckdb>=1.11.0",
     "dbt-trino==1.10.6",
+    "dbt-snowflake==1.12.4",
     "duckdb>=1.0",
     "git-cliff>=2.6",
     "pytest>=9.1.1",
