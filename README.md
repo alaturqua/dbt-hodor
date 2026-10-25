@@ -35,7 +35,7 @@ hodor holds the door in front of your warehouse. A node gets through to a rebuil
 For each node in `dbt run`, `dbt build`, `dbt test`, `dbt seed` or `dbt snapshot`, hodor:
 
 1. **Hashes the logic.** For a seed this is the CSV file. Otherwise the compiled SQL is normalized with [sqlglot](https://github.com/tobymao/sqlglot) (in the dialect of the target's adapter), so case, quoting, comments and table aliases do not count as changes. Values that differ on every run, such as `invocation_id`, are replaced first. The node config is hashed as well.
-2. **Checks the upstream data.** Each upstream table has a data version. On Databricks it comes from the Delta commit history; maintenance commits such as `OPTIMIZE` or `VACUUM` do not count as data changes. On DuckDB it is a content fingerprint.
+2. **Checks the upstream data.** Each upstream table has a data version. On Databricks it comes from the Delta commit history; maintenance commits such as `OPTIMIZE` or `VACUUM` do not count as data changes. On Trino it comes from the Iceberg snapshot history or the Delta Lake commit history, on Snowflake from `SYSTEM$LAST_CHANGE_COMMIT_TIME` with the `created` and `last_ddl` times, and on DuckDB it is a content fingerprint. See [Adapters](docs/adapters/index.md).
 3. **Decides.** It compares both against the record of the node's last build and returns `reuse` or `build`, with a reason code.
 4. **Records.** It appends one record per node to the state table.
 
