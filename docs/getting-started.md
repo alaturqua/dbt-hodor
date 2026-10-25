@@ -24,70 +24,22 @@ hodor needs Python 3.10 or newer, `dbt-core` 1.12.x and `sqlglot` 30.22 or newer
     pip install "dbt-hodor[duckdb]"
     ```
 
-=== "Databricks job"
-
-    A job installs the wheel from a Unity Catalog volume. Upload it with `databricks fs cp`, then list it as a library:
-
-    ```yaml
-    libraries:
-      - whl: /Volumes/<catalog>/<schema>/<volume>/dbt_hodor-<version>-py3-none-any.whl
-    ```
-
-    Or install directly from PyPI:
-
-    ```yaml
-    libraries:
-      - pypi:
-          package: "dbt-hodor"
-    ```
-
 The wheel is pure Python (`py3-none-any`), so the same file installs on Windows and on Linux job clusters.
 
-The `duckdb` extra adds the `duckdb` package, which the local state store needs. Your adapter is not a dependency of hodor. hodor supports the `databricks`, `duckdb`, `snowflake` and `trino` adapters and turns itself off on any other. The `delta` store needs the `databricks` adapter and the `trino` store needs the `trino` adapter; any other pairing turns hodor off with a warning.
+### What to install
 
-## Trino profile
+Your adapter is not a dependency of hodor. hodor supports the `databricks`, `duckdb`, `snowflake` and `trino` adapters and turns itself off on any other.
 
-On the `trino` adapter the default store is `trino`: the state table lives in the target's catalog, in the schema `hodor_schema`, which must exist. A `profiles.yml` entry:
+| Adapter | Adapter package | State store default | Install |
+| --- | --- | --- | --- |
+| [Databricks](adapters/databricks.md) | `dbt-databricks` | `delta` | `pip install dbt-hodor dbt-databricks` |
+| [Trino](adapters/trino.md) | `dbt-trino` | `trino` | `pip install dbt-hodor dbt-trino` |
+| [Snowflake](adapters/snowflake.md) | `dbt-snowflake` | `delta`, which turns hodor off; set `duckdb` or `postgres` | `pip install "dbt-hodor[duckdb]" dbt-snowflake` |
+| [DuckDB](adapters/duckdb.md) | `dbt-duckdb` | `delta`, which turns hodor off; set `duckdb` or `postgres` | `pip install "dbt-hodor[duckdb]" dbt-duckdb` |
 
-```yaml
-hodor_demo:
-  target: trino
-  outputs:
-    trino:
-      type: trino
-      host: localhost
-      port: 8080
-      user: dbt
-      database: iceberg
-      schema: demo
-      threads: 2
-      hodor_schema: ops
-      # state table: iceberg.ops.hodor_state
-```
+Extras are for state stores outside the warehouse: `duckdb` adds the `duckdb` package that the local state store needs, and `postgres` and `lakebase` add the Postgres drivers. See [State stores](stores/index.md) and [Adapters](adapters/index.md).
 
-To keep the state in a local DuckDB file instead, set `hodor_store: duckdb` and `hodor_path: .hodor/state.duckdb`.
-
-## Snowflake profile
-
-On the `snowflake` adapter the default store, `delta`, turns hodor off, so set `hodor_store` to `duckdb` or `postgres`. The `snowflake` adapter has no state store of its own yet. A `profiles.yml` entry with key-pair authentication and the state in a local DuckDB file, with placeholder values:
-
-```yaml
-hodor_demo:
-  target: snowflake
-  outputs:
-    snowflake:
-      type: snowflake
-      account: <account_identifier>
-      user: <user>
-      private_key_path: <path/to/private_key.p8>
-      role: <role>
-      warehouse: <warehouse>
-      database: <database>
-      schema: demo
-      threads: 2
-      hodor_store: duckdb
-      hodor_path: .hodor/state.duckdb
-```
+Profiles for each adapter: [Adapters](adapters/index.md).
 
 ## Local quickstart on DuckDB
 

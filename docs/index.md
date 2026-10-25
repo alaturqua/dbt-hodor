@@ -97,7 +97,7 @@ The [Slim CI](slim-ci.md) page has the setup. The [interactive guide](guide/inde
 
     Delta on Databricks, Postgres or Lakebase, or a local DuckDB file.
 
-    [:octicons-arrow-right-24: State stores](stores.md)
+    [:octicons-arrow-right-24: State stores](stores/index.md)
 
 - :material-shield-check:{ .lg .middle } __Operations__
 

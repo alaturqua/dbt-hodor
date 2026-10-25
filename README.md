@@ -20,7 +20,7 @@
 
 dbt-hodor is a free, self-hosted alternative to dbt Labs' [dbt State](https://docs.getdbt.com/docs/deploy/dbt-state-about). It runs inside dbt. For every selected node it decides whether to reuse the object that is already in the warehouse or to build it again. A node is reused when its logic has not changed and its upstream data has not changed since the last build.
 
-It needs no dbt platform account and sends nothing to external services. State lives in a Delta table on Databricks, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
+It needs no dbt platform account and sends nothing to external services. State lives in a Delta table on Databricks, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file. It supports the `databricks`, `trino`, `snowflake` and `duckdb` adapters: see [Adapters](docs/adapters/index.md).
 
 > **Status: early development.** hodor has end-to-end tests on dbt-duckdb and live tests on a Databricks SQL warehouse and on Databricks Lakebase; [the test docs](docs/development.md#tests) list what they cover. It has not run in a large production project yet. Before enabling reuse in production, run in shadow mode for at least a week of scheduled runs and review its decisions. See [the rollout guidance](docs/operations.md#rollout). Changes between releases, including the breaking ones, are in [Upgrading](docs/upgrading.md).
 
@@ -34,7 +34,7 @@ hodor holds the door in front of your warehouse. A node gets through to a rebuil
 
 For each node in `dbt run`, `dbt build`, `dbt test`, `dbt seed` or `dbt snapshot`, hodor:
 
-1. **Hashes the logic.** For a seed this is the CSV file. Otherwise the compiled SQL is normalized with [sqlglot](https://github.com/tobymao/sqlglot) (Databricks dialect), so case, quoting, comments and table aliases do not count as changes. Values that differ on every run, such as `invocation_id`, are replaced first. The node config is hashed as well.
+1. **Hashes the logic.** For a seed this is the CSV file. Otherwise the compiled SQL is normalized with [sqlglot](https://github.com/tobymao/sqlglot) (in the dialect of the target's adapter), so case, quoting, comments and table aliases do not count as changes. Values that differ on every run, such as `invocation_id`, are replaced first. The node config is hashed as well.
 2. **Checks the upstream data.** Each upstream table has a data version. On Databricks it comes from the Delta commit history; maintenance commits such as `OPTIMIZE` or `VACUUM` do not count as data changes. On DuckDB it is a content fingerprint.
 3. **Decides.** It compares both against the record of the node's last build and returns `reuse` or `build`, with a reason code.
 4. **Records.** It appends one record per node to the state table.
@@ -122,6 +122,8 @@ Name parts may contain letters, digits, `_` and `-`. hodor always quotes them.
 
 ### Where the state lives
 
+Each store has its own page: [State stores](docs/stores/index.md).
+
 | Store | Location | Created on first use |
 | --- | --- | --- |
 | `delta` | `<hodor_database>.<hodor_schema>.<hodor_table>` | the table only. The schema must exist, because creating one needs catalog-level grants |
@@ -154,7 +156,7 @@ The state table decides what gets skipped in prod. Grant `MODIFY` on it only to 
 
 ## Scope of v1
 
-Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular), on `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](docs/how-it-works/data-versions.md#snowflake)), with dbt-core 1.12.x. Trino support covers the Iceberg and Delta Lake connectors; see [Data versions](docs/how-it-works/data-versions.md#trino-iceberg-and-delta-lake-connectors).
+Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular), on `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](docs/adapters/snowflake.md#data-version)), with dbt-core 1.12.x. Trino support covers the Iceberg and Delta Lake connectors; see [Data versions](docs/adapters/trino.md#data-version).
 
 Model versions: each version is its own node with its own table and records. Moving `latest_version` rebuilds the models that `ref()` it.
 

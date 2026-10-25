@@ -56,7 +56,7 @@ dbt process
      ├─ plugin.py     initialize(): mode check, command gate, guard, install patches
      ├─ patches.py    ModelRunner.execute, TestRunner execute and result line, run-end flush
      ├─ config.py     state: keys, hodor settings, precedence
-     ├─ hashing.py    normalized SQL and config hashes (sqlglot, Databricks dialect)
+     ├─ hashing.py    normalized SQL and config hashes (sqlglot, dialect of the target's adapter)
      ├─ lineage.py    upstream tables per node: dbt parents, sources, external inputs
      ├─ metadata.py   data versions: Delta history (Databricks), content fingerprint (DuckDB)
      ├─ engine.py     pure decision rules (no I/O)
@@ -125,7 +125,7 @@ Rule 10 follows dbt State: a view always shows current upstream data, so new dat
 
 1. Take the node's compiled SQL.
 2. Replace this run's `invocation_id` and `run_started_at` values with fixed placeholders. Many projects inline `'{{ invocation_id }}'` into every model, for example as an audit column.
-3. Parse with sqlglot (`dialect="databricks"`). Run `qualify(dialect="databricks", validate_qualify_columns=False, expand_stars=False, identify=True, canonicalize_table_aliases=True)`. This normalizes keyword and identifier case, quoting and table aliases.
+3. Parse with sqlglot in the dialect of the target's adapter (the adapter type, for example `databricks`). Run `qualify(dialect=<adapter type>, validate_qualify_columns=False, expand_stars=False, identify=True, canonicalize_table_aliases=True)`. This normalizes keyword and identifier case, quoting and table aliases.
 4. Generate SQL without comments and hash it with sha256.
 5. If `qualify` fails, hash the parsed SQL generated without comments. If parsing fails, hash the compiled text with whitespace collapsed. Both fallbacks can only cause extra builds, never wrong reuses.
 
