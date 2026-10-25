@@ -36,7 +36,7 @@ hodor holds the door in front of your warehouse. A node gets through to a rebuil
 ## What it does for each node
 
 1. **Hashes the logic.** The compiled SQL is normalized with [sqlglot](https://github.com/tobymao/sqlglot), so case, quoting, comments and table aliases do not count as changes.
-2. **Checks the upstream data.** Each upstream table has a data version: the Delta commit history on Databricks, the `$history` table on Trino (Iceberg and Delta Lake connectors), a content fingerprint on DuckDB.
+2. **Checks the upstream data.** Each upstream table has a data version: the Delta commit history on Databricks, the `$history` table on Trino (Iceberg and Delta Lake connectors), the last commit time plus the table's creation and last DDL time on Snowflake, a content fingerprint on DuckDB.
 3. **Decides.** It compares both against the record of the node's last build and returns `reuse` or `build`, with a reason code.
 4. **Records.** It appends one record per node to the state table.
 

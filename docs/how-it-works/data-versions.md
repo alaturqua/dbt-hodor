@@ -52,10 +52,10 @@ What moves each part, checked on Snowflake 10.38 by the live test `test_snowflak
 
 A plain read moves nothing. The live lifecycle test also builds with dbt through insert, `ADD COLUMN` and `CREATE OR REPLACE` (see [Development](../development.md)). A `COMMENT` and a 0-row update move the token, so they cause an extra build, never a wrong reuse.
 
-- **Unknown:** no matching base table, more than one match, a dynamic, hybrid or Iceberg table (the query leaves them out, because their change tokens were not tested), a null or non-integer value, or an error from `SYSTEM$LAST_CHANGE_COMMIT_TIME` (for example a missing table). Dependents build.
+- **Unknown:** no matching base table, more than one match, a dynamic, hybrid or Iceberg table (the query leaves them out, because their change tokens were not tested; an account where `is_dynamic`, `is_hybrid` or `is_iceberg` is empty or missing gets no match, so every table builds), a null or non-integer value, or an error from `SYSTEM$LAST_CHANGE_COMMIT_TIME` (for example a missing table). Dependents build.
 - **Views:** a view is hashed from its definition in `<database>.information_schema.views`. Two views whose names differ only in case give an unknown version, on every adapter.
 - **Not supported:** stages and `@stage` reads are untraceable inputs, so the node builds. The `dynamic_table` materialization is unsupported, so those models always build.
-- **State store:** on the `snowflake` adapter the state store can be `duckdb` or `postgres`. The default, `delta`, turns hodor off.
+- **State store:** on the `snowflake` adapter the state store can be `duckdb` or `postgres`. The default, `delta`, turns hodor off. The live tests use `duckdb`; the `postgres` store uses its own connection and was not run together with Snowflake.
 
 ## DuckDB (content fingerprint)
 

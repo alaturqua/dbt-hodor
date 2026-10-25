@@ -6,7 +6,7 @@ hodor hashes each node's logic, so it can tell whether the code changed.
 
 1. Take the node's compiled SQL.
 2. Replace this run's `invocation_id` and `run_started_at` values with fixed placeholders. Many models inline `'{{ invocation_id }}'`, which would otherwise change the SQL on every run.
-3. Parse with sqlglot (the adapter's dialect: `databricks`, `duckdb` or `trino`). Replace each relation name that belongs to a node of the project, or of the `--state` manifest, with the node's `unique_id`, so a different catalog or schema per target hashes the same. A name that two nodes share stays as it is. Then run `qualify` with `validate_qualify_columns=False`, `expand_stars=False`, `identify=True` and `canonicalize_table_aliases=True`. This normalizes keyword and identifier case, quoting and table aliases.
+3. Parse with sqlglot (the adapter's dialect: `databricks`, `duckdb`, `snowflake` or `trino`). Replace each relation name that belongs to a node of the project, or of the `--state` manifest, with the node's `unique_id`, so a different catalog or schema per target hashes the same. A name that two nodes share stays as it is. Then run `qualify` with `validate_qualify_columns=False`, `expand_stars=False`, `identify=True` and `canonicalize_table_aliases=True`. This normalizes keyword and identifier case, quoting and table aliases.
 4. Generate SQL without comments and hash it with sha256.
 5. If `qualify` fails, hash the parsed SQL generated without comments. If parsing fails, hash the compiled text with whitespace collapsed. Both fallbacks can only cause extra builds, never wrong reuses.
 

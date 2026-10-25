@@ -91,6 +91,7 @@ def _create_with_profile(monkeypatch, adapter_type, **profile):
         ("databricks", "trino", None),
         ("duckdb", "trino", None),
         ("snowflake", "duckdb", providers.SnowflakeProvider),
+        ("snowflake", "postgres", providers.SnowflakeProvider),
         ("snowflake", "delta", None),
         ("snowflake", "trino", None),
         ("bigquery", "duckdb", None),
