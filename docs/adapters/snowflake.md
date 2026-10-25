@@ -7,17 +7,15 @@ hodor on `dbt-snowflake`, tested with `dbt-snowflake` 1.12.4. The live test pass
 === "uv"
 
     ```sh
-    uv pip install dbt-hodor dbt-snowflake
     # with the local DuckDB state store
-    uv pip install "dbt-hodor[duckdb]"
+    uv pip install "dbt-hodor[duckdb]" dbt-snowflake
     ```
 
 === "pip"
 
     ```sh
-    pip install dbt-hodor dbt-snowflake
     # with the local DuckDB state store
-    pip install "dbt-hodor[duckdb]"
+    pip install "dbt-hodor[duckdb]" dbt-snowflake
     ```
 
 ## Profile

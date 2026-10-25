@@ -639,6 +639,11 @@ svg.door { width:100%; max-height:250px; }
           <button class="btn" data-fp="reset" type="button">Reset</button>
         </div>
       </div>
+      <div class="card">
+        <h3>Trino and Snowflake</h3>
+        <p><b>Trino:</b> the Iceberg snapshot history and metadata log, or the Delta Lake commit history, read from the <code>$history</code> table. Other connectors have no history, so their tables are unknown and dependents build. <a href="../adapters/trino/">Trino adapter</a>.</p>
+        <p><b>Snowflake:</b> the <code>SYSTEM$LAST_CHANGE_COMMIT_TIME</code> token with the <code>created</code> and <code>last_ddl</code> times of the table. <a href="../adapters/snowflake/">Snowflake adapter</a>.</p>
+      </div>
       <div class="card fill"><h3>What dbt-hodor prints (simulated)</h3><div class="term mini" id="log6" role="log" tabindex="0" aria-label="Simulated dbt-hodor log"></div></div>
     </div>
   </div>
@@ -757,9 +762,7 @@ svg.door { width:100%; max-height:250px; }
     <div class="toc" role="group" aria-label="Docs sections">
       <button class="btn" type="button" data-to="d-what">What it is</button>
       <button class="btn" type="button" data-to="d-install">Install</button>
-      <button class="btn" type="button" data-to="d-node">Node configs</button>
-      <button class="btn" type="button" data-to="d-settings">Settings</button>
-      <button class="btn" type="button" data-to="d-store">State store</button>
+      <button class="btn" type="button" data-to="d-more">Adapters and settings</button>
       <button class="btn" type="button" data-to="d-reasons">Reason codes</button>
       <button class="btn" type="button" data-to="d-cli">CLI</button>
       <button class="btn" type="button" data-to="d-ci">Slim CI</button>
@@ -768,7 +771,7 @@ svg.door { width:100%; max-height:250px; }
     </div>
     <div class="docbody" id="docbody" tabindex="0" role="region" aria-label="Docs">
   <h2>Docs</h2>
-  <div class="note"><b>Early development.</b> The engine and stores pass end-to-end tests on dbt-duckdb and a live test on Databricks. Not yet proven in a large production project.</div>
+  <div class="note"><b>Early development.</b> The engine and stores pass end-to-end tests on dbt-duckdb and live tests on Databricks, Trino (Iceberg) and Snowflake. Not yet proven in a large production project.</div>
 
   <h3 id="d-what">What it is</h3>
   <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, dbt-trino 1.10.6 (Iceberg and Delta Lake connectors; Delta Lake connector: unit tests only), dbt-snowflake 1.12.4 (state in DuckDB or Postgres), and dbt-duckdb for local development and tests.</p>
@@ -780,57 +783,15 @@ svg.door { width:100%; max-height:250px; }
 pip install "dbt-hodor[duckdb]"</code></pre>
   <p>Requires Python 3.10 or newer. If upstream <code>dbt_state</code> is also installed, hodor disables itself with a warning.</p>
 
-  <h3 id="d-node">Node configs</h3>
-  <p>Set them under <code>state:</code> in YAML (same block as dbt State).</p>
-<pre><code># dbt_project.yml
-models:
-  my_project:
-    +state:
-      lag_tolerance: 4h
-      require_fresh_data_from: any</code></pre>
-  <div class="tw"><table>
-    <tr><th>Key</th><th>Default</th><th>Values</th></tr>
-    <tr><td><code>lag_tolerance</code></td><td><code>45m</code></td><td><code>0s</code>, <code>45m</code>, <code>4h</code>, <code>1d</code>, <code>1w</code>, integer seconds, or <code>{count: 4, period: hour}</code></td></tr>
-    <tr><td><code>require_fresh_data_from</code></td><td><code>any</code></td><td><code>any</code>: build when any upstream has new data. <code>all</code>: build only when all have.</td></tr>
-    <tr><td><code>compare_unrendered_code</code></td><td><code>false</code></td><td><code>true</code>: build only when both the rendered and the unrendered code changed</td></tr>
-    <tr><td><code>execute_hooks_on_any_reuse</code></td><td><code>false</code></td><td><code>true</code>: run pre- and post-hooks on a reused node (<code>execute_hooks_on_reuse</code> also accepted)</td></tr>
-    <tr><td><code>evaluate_volatile_sql</code></td><td>auto</td><td>auto: <code>current_date()</code>, <code>current_user()</code>, <code>current_timestamp()</code> and similar functions count as a changing upstream unless they only fill a stamp column; <code>true</code>: stamps count too; <code>false</code>: never (dbt State default)</td></tr>
-  </table></div>
-  <p><code>pre_clone</code>, <code>allow_clones</code> and <code>defer_to_target</code> are accepted and ignored, with a warning.</p>
-
-  <h3 id="d-settings">Settings</h3>
-  <p>Set them on the <code>profiles.yml</code> target. An environment variable overrides the profile key. Name parts may contain letters, digits, <code>_</code> and <code>-</code>; hodor always quotes them.</p>
-  <div class="tw"><table>
-    <tr><th>Profile key</th><th>Env var</th><th>Default</th><th>Values</th></tr>
-    <tr><td><code>hodor_mode</code></td><td><code>HODOR_MODE</code></td><td><code>shadow</code></td><td><code>off</code>, <code>shadow</code>, <code>on</code></td></tr>
-    <tr><td><code>hodor_store</code></td><td><code>HODOR_STORE</code></td><td><code>trino</code> on the <code>trino</code> adapter, <code>delta</code> on every other adapter</td><td><code>delta</code>, <code>duckdb</code>, <code>postgres</code> (alias <code>lakebase</code>), <code>trino</code></td></tr>
-    <tr><td><code>hodor_database</code></td><td><code>HODOR_DATABASE</code></td><td>the target's catalog, for <code>delta</code> and <code>trino</code> only</td><td>Databricks or Trino catalog, or Postgres database (required); not used by <code>duckdb</code></td></tr>
-    <tr><td><code>hodor_schema</code></td><td><code>HODOR_SCHEMA</code></td><td>none for <code>delta</code>, <code>trino</code> and <code>postgres</code> (required); <code>main</code> for <code>duckdb</code></td><td>schema name</td></tr>
-    <tr><td><code>hodor_table</code></td><td><code>HODOR_TABLE</code></td><td><code>hodor_state</code></td><td>table name</td></tr>
-    <tr><td><code>hodor_path</code></td><td><code>HODOR_PATH</code></td><td><code>.hodor/state.duckdb</code></td><td>DuckDB file, for <code>duckdb</code></td></tr>
-    <tr><td><code>hodor_metadata_threads</code></td><td><code>HODOR_METADATA_THREADS</code></td><td><code>8</code></td><td>1 to 64</td></tr>
-    <tr><td><code>hodor_lookback_days</code></td><td><code>HODOR_LOOKBACK_DAYS</code></td><td><code>90</code></td><td>1 to 3650</td></tr>
-    <tr><td><code>hodor_endpoint</code></td><td><code>HODOR_ENDPOINT</code></td><td>none</td><td>Lakebase endpoint path, <code>projects/&lt;p&gt;/branches/&lt;b&gt;/endpoints/&lt;e&gt;</code>. Supplies host, user and OAuth token</td></tr>
-    <tr><td><code>hodor_host</code>, <code>hodor_port</code>, <code>hodor_user</code>, <code>hodor_password</code>, <code>hodor_sslmode</code></td><td><code>HODOR_HOST</code> and so on</td><td>port <code>5432</code>, sslmode <code>require</code></td><td>For a Postgres that is not Lakebase. Keep the password in an environment variable</td></tr>
-  </table></div>
-<pre><code># profiles.yml
-my_project:
-  target: prod
-  outputs:
-    prod:
-      type: databricks
-      catalog: my_catalog
-      # ... connection settings ...
-      hodor_mode: shadow
-      hodor_schema: my_ops_schema
-    local:
-      type: duckdb
-      path: dev.duckdb
-      hodor_store: duckdb</code></pre>
-
-  <h3 id="d-store">State store</h3>
-  <p>An append-only table with one record per node per run. The <code>delta</code> table is <code>&lt;catalog&gt;.&lt;schema&gt;.hodor_state</code>, clustered by <code>(target_name, node_key)</code>. The schema must exist: hodor creates only the table. The <code>duckdb</code> store is a local file that hodor creates. The <code>postgres</code> store holds state in any Postgres, Databricks Lakebase included, and creates its schema and table on first use.</p>
-  <p>The state table decides what is skipped in prod. Grant <code>MODIFY</code> on it only to the job service principals. Without <code>hodor_schema</code>, the <code>delta</code> store turns hodor off with a warning. Cleanup is manual: <code>DELETE FROM hodor_state WHERE recorded_at_ms &lt; &lt;cutoff&gt;</code>, then <code>VACUUM</code> on Delta.</p>
+  <h3 id="d-more">Adapters, stores and settings</h3>
+  <p>The reference pages hold the details:</p>
+  <ul>
+    <li><a href="../getting-started/">Getting started</a>: what to install and a local quickstart on DuckDB.</li>
+    <li><a href="../adapters/">Adapters</a>: a profile, the data version and the limits for Databricks, Trino, Snowflake and DuckDB.</li>
+    <li><a href="../stores/">State stores</a>: where the state table lives, which store works on which adapter, records and retention.</li>
+    <li><a href="../configuration/">Configuration</a>: node configs under <code>state:</code>, the <code>hodor_*</code> settings and <code>--vars</code>.</li>
+    <li><a href="../operations/">Operations</a>: rollout, explaining a decision, deleting old records and fail open.</li>
+  </ul>
 
   <h3 id="d-reasons">Reason codes</h3>
   <p>First match wins. Shadow mode builds anyway and records the decision.</p>

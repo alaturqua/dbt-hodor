@@ -58,9 +58,10 @@ dbt process
      ├─ config.py     state: keys, hodor settings, precedence
      ├─ hashing.py    normalized SQL and config hashes (sqlglot, dialect of the target's adapter)
      ├─ lineage.py    upstream tables per node: dbt parents, sources, external inputs
-     ├─ metadata.py   data versions: Delta history (Databricks), content fingerprint (DuckDB)
+     ├─ metadata.py   data versions: tokens and Delta history rules
+     ├─ providers.py  per adapter queries: Databricks, Trino, Snowflake, DuckDB
      ├─ engine.py     pure decision rules (no I/O)
-     ├─ store/        StateStore protocol: delta.py, duckdb.py, postgres.py
+     ├─ store/        StateStore protocol: delta.py, trino.py, duckdb.py, postgres.py
      └─ cli.py        dbt-hodor ddl, explain, prune
 ```
 

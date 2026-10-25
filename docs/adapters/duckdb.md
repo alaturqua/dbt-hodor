@@ -29,6 +29,7 @@ hodor_demo:
       threads: 2
       hodor_store: duckdb          # state goes to a local DuckDB file
       hodor_path: .hodor/state.duckdb
+      # state table: main.hodor_state in .hodor/state.duckdb
 ```
 
 The [local quickstart](../getting-started.md#local-quickstart-on-duckdb) builds a project on this profile.
