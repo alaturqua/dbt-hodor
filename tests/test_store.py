@@ -2,9 +2,12 @@ import pytest
 import sqlglot
 from sqlglot import exp
 
+from dbt_hodor.config import NodeStateConfig
+from dbt_hodor.engine import BUILD, NodeFacts, decide
 from dbt_hodor.records import COLUMN_NAMES, Record
 from dbt_hodor.store import StoreError
-from dbt_hodor.store.delta import DeltaStore, quote_table, sql_literal
+from dbt_hodor.store.delta import DeltaStore, quote_table, sql_literal, trino_literal
+from dbt_hodor.store.trino import TrinoStore
 
 duckdb = pytest.importorskip("duckdb")
 from dbt_hodor.store.duckdb import DuckDBStore  # noqa: E402
@@ -173,16 +176,38 @@ class FakeWarehouse:
         return self.rows if sql.startswith("SELECT") else []
 
 
-def test_delta_store_inserts_in_batches_that_parse_back(record):
+STORES = [(DeltaStore, "`", "databricks"), (TrinoStore, '"', "trino")]
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_store_quotes_the_table_and_wraps_errors(store_class, quote, dialect):
     warehouse = FakeWarehouse()
-    store = DeltaStore("c", "s", "hodor_state", warehouse, batch_size=2)
-    tricky = record(record_id="x", reason="it's \\ odd", test_result={"message": "a'b\nc"})
+    store_class("iceberg", "ops", "hodor_state", warehouse)
+    table = ".".join(f"{quote}{p}{quote}" for p in ("iceberg", "ops", "hodor_state"))
+    probe, create = warehouse.statements
+    assert probe == f"SELECT * FROM {table} LIMIT 0"
+    assert create.startswith(f"CREATE TABLE IF NOT EXISTS {table}")
+    assert ("CLUSTER BY" in create) == (store_class is DeltaStore)
+    if store_class is TrinoStore:
+        assert "record_id varchar" in create
+        assert "recorded_at_ms bigint" in create
+    with pytest.raises(StoreError):
+        store_class("c", "s", f"bad{quote}name", FakeWarehouse())
+    with pytest.raises(StoreError):
+        store_class("c", "s", "hodor_state", FakeWarehouse(fail=True))
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_store_inserts_in_batches_that_parse_back(store_class, quote, dialect, record):
+    warehouse = FakeWarehouse()
+    store = store_class("c", "s", "hodor_state", warehouse, batch_size=2)
+    tricky = record(
+        record_id="x", reason="it's \\ odd", test_result={"message": "a'b\nc\\d \u00e9"}
+    )
     store.append([record(record_id="1"), record(record_id="2"), tricky])
-    probe, create, *inserts = warehouse.statements
-    assert probe == "SELECT * FROM `c`.`s`.`hodor_state` LIMIT 0"
-    assert create.startswith("CREATE TABLE IF NOT EXISTS `c`.`s`.`hodor_state`")
+    inserts = warehouse.statements[2:]
     assert len(inserts) == 2
-    parsed = sqlglot.parse_one(inserts[1], read="databricks")
+    parsed = sqlglot.parse_one(inserts[1], read=dialect)
     values = [
         None if isinstance(v, exp.Null) else v.this if v.is_string else int(v.this)
         for v in parsed.find(exp.Tuple).expressions
@@ -190,12 +215,21 @@ def test_delta_store_inserts_in_batches_that_parse_back(record):
     assert values == list(tricky.to_row())
 
 
-def test_delta_store_load_parses_rows(record):
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_store_reads_with_dialect_literals(store_class, quote, dialect, record):
     warehouse = FakeWarehouse(rows=[record().to_row()])
-    store = DeltaStore("c", "s", "hodor_state", warehouse)
-    assert store.load("proj", "prod", 5) == {"c.s.fct": record()}
+    store = store_class("c", "s", "hodor_state", warehouse, read_only=True)
+    assert warehouse.statements == []  # read-only: no probe, no CREATE
+    assert store.load("pro'j", "prod", 5) == {"c.s.fct": record()}
     select = warehouse.statements[-1]
-    assert "project_name = 'proj' AND target_name = 'prod' AND recorded_at_ms >= 5" in select
+    project = store_class._literal("pro'j")
+    assert f"project_name = {project} AND target_name = 'prod' AND recorded_at_ms >= 5" in select
+    assert sqlglot.parse_one(select, read=dialect).find(exp.Window) is not None
+    assert store.invocation("proj", "prod", None) == [record()]
+    assert (
+        f"FROM {quote}c{quote}.{quote}s{quote}.{quote}hodor_state{quote}"
+        in (warehouse.statements[-1])
+    )
 
 
 def test_delta_store_invocation_and_before(record):
@@ -213,13 +247,6 @@ def test_delta_store_invocation_and_before(record):
     assert "recorded_at_ms >= 5 AND recorded_at_ms < 9" in warehouse.statements[-1]
 
 
-def test_delta_store_wraps_errors(record):
-    with pytest.raises(StoreError):
-        DeltaStore("c", "s", "hodor_state", FakeWarehouse(fail=True))
-    with pytest.raises(StoreError):
-        DeltaStore("c", "s", "bad`name", FakeWarehouse())
-
-
 def test_record_columns_match_store_schema(store):
     cols = [r[0] for r in store._con.execute("describe main.hodor_state").fetchall()]
     assert tuple(cols) == COLUMN_NAMES
@@ -231,3 +258,51 @@ def test_delta_store_skips_create_when_the_table_exists():
     warehouse = FakeWarehouse(exists=True)
     DeltaStore("c", "s", "hodor_state", warehouse)
     assert warehouse.statements == ["SELECT * FROM `c`.`s`.`hodor_state` LIMIT 0"]
+
+
+@pytest.mark.parametrize(
+    ("value", "literal"),
+    [
+        (None, "NULL"),
+        (True, "TRUE"),
+        (7, "7"),
+        ("plain", "'plain'"),
+        ("O'Brien", "'O''Brien'"),
+        ("''", "''''''"),
+        ("back\\slash", "'back\\slash'"),
+        ("a\\'b", "'a\\''b'"),
+        ("line1\nline2\r\n", "'line1\nline2\r\n'"),
+        ("caf\u00e9 \u2603 \U0001f600", "'caf\u00e9 \u2603 \U0001f600'"),
+    ],
+)
+def test_trino_literal(value, literal):
+    assert trino_literal(value) == literal
+
+
+def test_trino_literal_rejects_other_types():
+    with pytest.raises(TypeError):
+        trino_literal(1.5)
+
+
+class InsertFails(FakeWarehouse):
+    """Creating and reading work; every INSERT raises, like a commit conflict."""
+
+    def __call__(self, sql):
+        if sql.startswith("INSERT"):
+            self.statements.append(sql)
+            raise RuntimeError("commit conflict")
+        return super().__call__(sql)
+
+
+@pytest.mark.parametrize("store_class", [DeltaStore, TrinoStore])
+def test_failed_insert_is_a_store_error_and_leaves_no_history(store_class, record):
+    warehouse = InsertFails()
+    store = store_class("c", "s", "hodor_state", warehouse, batch_size=2)
+    with pytest.raises(StoreError, match="cannot write hodor state: commit conflict"):
+        store.append([record(record_id="1"), record(record_id="2"), record(record_id="3")])
+    assert sum(s.startswith("INSERT") for s in warehouse.statements) == 1  # stops at the first
+    # nothing was stored, so the next run finds no record and builds the node
+    last = store.load("proj", "prod", 0).get("c.s.fct")
+    facts = NodeFacts(kind="table", code_hash="h", config_hash="c", hash_version="1")
+    decision = decide(facts, last, NodeStateConfig(), 1_000_000)
+    assert (decision.action, decision.reason) == (BUILD, "no_history")

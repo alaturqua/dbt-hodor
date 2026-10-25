@@ -10,7 +10,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
-from dbt_hodor.config import IDENT_RE
+from dbt_hodor.config import IDENT_RE, WAREHOUSE_STORES
 from dbt_hodor.records import create_table_sql
 
 
@@ -27,15 +27,20 @@ def _days(value: str) -> int:
 
 
 def _ddl(args: argparse.Namespace) -> str:
-    if args.store == "delta":
+    from dbt_hodor.store.delta import quote_table
+
+    if args.store in WAREHOUSE_STORES:
         if not args.database or not args.schema:
-            raise SystemExit("dbt-hodor ddl: --database and --schema are required for delta")
-        table = ".".join(f"`{p}`" for p in (args.database, args.schema, args.table))
+            raise SystemExit(
+                f"dbt-hodor ddl: --database and --schema are required for {args.store}"
+            )
+        quote = "`" if args.store == "delta" else '"'
+        table = quote_table(args.database, args.schema, args.table, quote=quote)
     elif args.store == "postgres" and not args.schema:
         raise SystemExit("dbt-hodor ddl: --schema is required for postgres")
     else:
         table = ".".join(f'"{p}"' for p in (args.schema or "main", args.table))
-    return create_table_sql(table, "duckdb" if args.store == "duckdb" else args.store) + ";"
+    return create_table_sql(table, args.store) + ";"
 
 
 def _open_store(
@@ -59,14 +64,17 @@ def _open_store(
     project = load_project(str(flags.PROJECT_DIR), False, profile, {}, require_vars=False)
     config = RuntimeConfig.from_parts(project, profile, flags)
     settings = load_settings(
-        _profile_settings(config), os.environ, lambda m: print(f"dbt-hodor: {m}", file=sys.stderr)
+        _profile_settings(config),
+        os.environ,
+        lambda m: print(f"dbt-hodor: {m}", file=sys.stderr),
+        adapter_type=config.credentials.type,
     )
-    if settings.store == "delta" and not (settings.database and settings.schema):
+    if settings.store in WAREHOUSE_STORES and not (settings.database and settings.schema):
         raise SystemExit(
-            f"dbt-hodor {command}: the delta store needs hodor_database and hodor_schema"
+            f"dbt-hodor {command}: the {settings.store} store needs hodor_database and hodor_schema"
         )
     adapter = None
-    if settings.store == "delta":  # the state table is read through dbt's own connection
+    if settings.store in WAREHOUSE_STORES:  # the state table is read through dbt's own connection
         register_adapter(config, get_mp_context())
         adapter = get_adapter(config)
     try:
@@ -139,8 +147,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     ddl = commands.add_parser(
         "ddl", help="print the CREATE TABLE statement for the state table (for manual creation)"
     )
-    ddl.add_argument("--store", choices=("delta", "duckdb", "postgres"), default="delta")
-    ddl.add_argument("--database", type=_ident, help="catalog (delta)")
+    ddl.add_argument(
+        "--store",
+        choices=("delta", "duckdb", "postgres", "trino"),
+        default="delta",
+        help="ddl has no adapter and defaults to delta; pass --store trino for Trino",
+    )
+    ddl.add_argument("--database", type=_ident, help="catalog (delta, trino)")
     ddl.add_argument("--schema", type=_ident)
     ddl.add_argument("--table", type=_ident, default="hodor_state")
     explain = commands.add_parser(
