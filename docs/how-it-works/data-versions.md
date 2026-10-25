@@ -36,7 +36,7 @@ hodor runs `select * from "<catalog>"."<schema>"."<table>$history"` and reads th
 
 A view is hashed from its definition in `<catalog>.information_schema.views`.
 
-Limit: hodor reads the whole `$history` table of each relevant table, not a window of 20 commits. The Trino adapter needs the state store to be `duckdb` or `postgres`.
+Limit: hodor reads the whole `$history` table of each relevant table, not a window of 20 commits. On the Trino adapter the state store can be `trino`, `duckdb` or `postgres`.
 
 ## DuckDB (content fingerprint)
 

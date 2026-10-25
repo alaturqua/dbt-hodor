@@ -9,11 +9,12 @@ Until 1.0, the settings and the record schema may change in a minor release.
 ### Behavior changes
 
 - **`--empty` runs are not recorded.** dbt-hodor is off for the whole run. Before, an `--empty` run wrote build records, and a later normal run could reuse the zero-row tables. If you ran `--empty` on 0.2.0, run `dbt build --full-refresh` once: it builds every node and writes new records. A node that sets `full_refresh: false` is not rebuilt by the flag.
-- **The default store follows the adapter.** With no `hodor_store`, the `trino` adapter now uses the new `trino` store, which writes the state table through dbt's connection into the catalog `hodor_database` (default: the target's `database`) and the schema `hodor_schema`. Before, an unset store meant `delta`, which turns hodor off on Trino. `databricks` keeps `delta`. On `duckdb` and every other adapter the default stays `delta`, which turns hodor off until you set `hodor_store`. A `hodor_store` you set always wins. Without `hodor_schema` on Trino, hodor is off for the run with a warning, as for `delta`.
+- **The default store follows the adapter.** With no `hodor_store`, the `trino` adapter uses the `trino` store. `databricks` keeps `delta`. On `duckdb` the default stays `delta`, which turns hodor off until you set `hodor_store`. A `hodor_store` you set always wins.
 
 ### New
 
-- **`trino` store.** The state table lives in a Trino catalog (Iceberg or Delta Lake connector). See [State stores](stores.md#trino).
+- **Trino adapter.** hodor runs on `dbt-trino` 1.10.6 with the Iceberg and Delta Lake connectors. Data versions come from the Iceberg snapshot history and the Delta Lake commit history; see [Data versions](how-it-works/data-versions.md#trino-iceberg-and-delta-lake-connectors). The Iceberg connector was tested live on Trino 476 in Docker; the Delta Lake connector has unit tests only.
+- **`trino` store.** The state table lives in a Trino catalog, written through dbt's connection, in the catalog `hodor_database` (default: the target's `database`) and the schema `hodor_schema`. Without `hodor_schema`, hodor is off for the run with a warning, as for `delta`. See [State stores](stores.md#trino).
 
 ## 0.2.0
 
