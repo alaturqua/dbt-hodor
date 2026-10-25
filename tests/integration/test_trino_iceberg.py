@@ -2,7 +2,9 @@
 
 Needs a Trino server with an `iceberg` catalog (see docs/development.md for the Docker command).
 Host and port come from HODOR_TEST_TRINO_HOST and HODOR_TEST_TRINO_PORT (localhost and 8080).
-The test creates one schema per run in the iceberg catalog and drops it at the end.
+The test creates one schema per run in the iceberg catalog and drops it at the end. It runs
+twice: with the state in a local DuckDB file, and with `hodor_store: trino` writing the state
+table into the same schema.
 """
 
 from __future__ import annotations
@@ -65,7 +67,8 @@ FILES = {
               database: iceberg
               schema: "{{ env_var('HODOR_TEST_TRINO_SCHEMA') }}"
               threads: 2
-              hodor_store: duckdb
+              hodor_store: "{{ env_var('HODOR_TEST_TRINO_STORE') }}"
+              hodor_schema: "{{ env_var('HODOR_TEST_TRINO_STATE_SCHEMA') }}"
               hodor_path: "{{ env_var('HODOR_TEST_TRINO_STATE') }}"
     """,
     "models/sources.yml": """
@@ -95,8 +98,8 @@ FILES = {
 }
 
 
-@pytest.fixture
-def project(tmp_path, monkeypatch):
+@pytest.fixture(params=["duckdb", "trino"])
+def project(request, tmp_path, monkeypatch):
     root = tmp_path / "project"
     for name, body in FILES.items():
         path = root / name
@@ -108,12 +111,17 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("HODOR_TEST_TRINO_PORT", str(PORT))
     monkeypatch.setenv("HODOR_TEST_TRINO_SCHEMA", schema)
     monkeypatch.setenv("HODOR_TEST_TRINO_STATE", str(state))
+    monkeypatch.setenv("HODOR_TEST_TRINO_STORE", request.param)
+    # the duckdb store has its own schema; the trino store uses the test schema
+    monkeypatch.setenv(
+        "HODOR_TEST_TRINO_STATE_SCHEMA", schema if request.param == "trino" else "main"
+    )
     monkeypatch.setenv("HODOR_MODE", "on")
     monkeypatch.setenv("DBT_SEND_ANONYMOUS_USAGE_STATS", "false")
     try:
         execute(f"create schema {CATALOG}.{schema} with (location = 'local:///{schema}')")
         execute(f"create table {CATALOG}.{schema}.raw_orders as select 1 as id, 10 as amount")
-        yield root, schema, state
+        yield root, schema, state, request.param
     finally:
         if execute(f"show schemas from {CATALOG} like '{schema}'"):
             execute(f"drop view if exists {CATALOG}.{schema}.v_orders")
@@ -128,17 +136,23 @@ def dbt(root: Path) -> dict[str, tuple[str, str]]:
     return {r.node.name: (str(r.status), r.message or "") for r in result.result.results}
 
 
-def decisions(state: Path) -> dict[str, tuple[str, str]]:
-    """Latest (action, reason) per node name."""
-    with duckdb.connect(str(state), read_only=True) as con:
-        rows = con.execute(
-            "select unique_id, action, reason from main.hodor_state order by recorded_at_ms"
-        ).fetchall()
+def decisions(state: Path, store: str, schema: str) -> dict[str, tuple[str, str]]:
+    """Latest (action, reason) per node name, read back from the store under test."""
+    if store == "trino":
+        rows = execute(
+            "select unique_id, action, reason "
+            f"from {CATALOG}.{schema}.hodor_state order by recorded_at_ms, record_id"
+        )
+    else:
+        with duckdb.connect(str(state), read_only=True) as con:
+            rows = con.execute(
+                "select unique_id, action, reason from main.hodor_state order by recorded_at_ms"
+            ).fetchall()
     return {uid.split(".")[2]: (action, reason) for uid, action, reason in rows}
 
 
 def test_iceberg_lifecycle(project):
-    root, schema, state = project
+    root, schema, state, store = project
     raw = f"{CATALOG}.{schema}.raw_orders"
     history = f'{CATALOG}.{schema}."raw_orders$history"'
     first_snapshot = execute(f"select snapshot_id from {history}")[0][0]
@@ -146,7 +160,10 @@ def test_iceberg_lifecycle(project):
     # 1. first run builds everything
     first = dbt(root)
     assert {status for status, _ in first.values()} == {"success"}
-    assert {reason for _, reason in decisions(state).values()} == {"no_history"}
+    if store == "trino":  # the records are in the Trino table, not only in memory
+        written = execute(f"select count(*) from {CATALOG}.{schema}.hodor_state")[0][0]
+        assert written >= len(first)
+    assert {reason for _, reason in decisions(state, store, schema).values()} == {"no_history"}
 
     # 2. nothing changed: tables are reused, and so is the unchanged view
     second = dbt(root)
@@ -157,7 +174,7 @@ def test_iceberg_lifecycle(project):
     # 3. a new row in the source rebuilds the tables
     execute(f"insert into {raw} values (2, 20)")
     dbt(root)
-    now = decisions(state)
+    now = decisions(state, store, schema)
     assert now["stg_orders"] == ("build", "new_upstream_data")
     assert now["fct_orders"] == ("build", "new_upstream_data")
     assert now["v_orders"] == ("reuse", "view_unchanged")
@@ -169,7 +186,7 @@ def test_iceberg_lifecycle(project):
         f"call {CATALOG}.system.rollback_to_snapshot('{schema}', 'raw_orders', {first_snapshot})"
     )
     dbt(root)
-    now = decisions(state)
+    now = decisions(state, store, schema)
     assert now["stg_orders"] == ("build", "new_upstream_data")
     assert now["fct_orders"] == ("build", "new_upstream_data")
     assert execute(f"select count(*) from {CATALOG}.{schema}.fct_orders") == [(1,)]
@@ -179,12 +196,16 @@ def test_iceberg_lifecycle(project):
     path.write_text(path.read_text().replace("amount2 from", "amount2 + 1 as amount2 from"))
     third = dbt(root)
     assert third["v_orders"][0] == "success"
-    assert decisions(state)["v_orders"] == ("build", "code_changed")
+    assert decisions(state, store, schema)["v_orders"] == ("build", "code_changed")
 
     # 6. a schema change adds no snapshot but still counts as new data for a select *
     execute(f"alter table {raw} add column note varchar")
     dbt(root)
-    assert decisions(state)["all_orders"] == ("build", "new_upstream_data")
+    assert decisions(state, store, schema)["all_orders"] == ("build", "new_upstream_data")
     columns = execute(f"show columns from {CATALOG}.{schema}.all_orders")
     assert [c[0] for c in columns] == ["id", "amount", "note"]
     assert dbt(root)["all_orders"] == ("reused", "REUSED (no_new_data)")
+    if store == "trino":
+        # every run appended its records; count grew past the first run's
+        total = execute(f"select count(*) from {CATALOG}.{schema}.hodor_state")[0][0]
+        assert total > written

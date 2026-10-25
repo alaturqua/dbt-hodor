@@ -213,3 +213,50 @@ def test_invalid_table_falls_back_to_default():
     settings = load_settings({"hodor_store": "duckdb", "hodor_table": "a.b"}, {}, warnings.append)
     assert settings.table == "hodor_state"
     assert any("invalid hodor_table" in w for w in warnings)
+
+
+@pytest.mark.parametrize(
+    ("adapter_type", "store"),
+    [
+        (None, "delta"),
+        ("databricks", "delta"),
+        ("duckdb", "delta"),  # kept: the runtime turns delta off on a non-databricks adapter
+        ("trino", "trino"),
+    ],
+)
+def test_unset_store_follows_the_adapter(adapter_type, store):
+    profile = {"hodor_schema": "s", "database": "c"}
+    settings = load_settings(profile, {}, pytest.fail, adapter_type=adapter_type)
+    assert (settings.store, settings.database, settings.mode) == (store, "c", "shadow")
+
+
+@pytest.mark.parametrize("adapter_type", ["databricks", "duckdb", "trino"])
+def test_explicit_store_wins_over_the_adapter(adapter_type):
+    settings = load_settings({"hodor_store": "duckdb"}, {}, pytest.fail, adapter_type=adapter_type)
+    assert settings.store == "duckdb"
+    profile = {"hodor_store": "delta", "hodor_schema": "s", "database": "c"}
+    assert load_settings(profile, {}, pytest.fail, adapter_type=adapter_type).store == "delta"
+    profile = {"hodor_schema": "s", "database": "c"}
+    env = {"HODOR_STORE": "trino"}
+    assert load_settings(profile, env, pytest.fail, adapter_type=adapter_type).store == "trino"
+
+
+def test_invalid_store_falls_back_to_the_adapter_default():
+    warnings = []
+    profile = {"hodor_store": "parquet", "hodor_schema": "s", "database": "c"}
+    settings = load_settings(profile, {}, warnings.append, adapter_type="trino")
+    assert settings.store == "trino"
+    assert warnings == ["invalid hodor_store 'parquet'; using 'trino'"]
+
+
+def test_trino_store_uses_the_target_catalog_and_needs_a_schema():
+    warnings = []
+    settings = load_settings({"database": "iceberg"}, {}, warnings.append, adapter_type="trino")
+    assert (settings.store, settings.database, settings.mode) == ("trino", "iceberg", "off")
+    assert warnings == ["store 'trino' needs hodor_schema; off for this run"]
+    settings = load_settings({"hodor_schema": "ops"}, {}, warnings.append, adapter_type="trino")
+    assert settings.mode == "off"
+    assert warnings[-1] == "store 'trino' needs hodor_database; off for this run"
+    profile = {"database": "iceberg", "hodor_schema": "ops", "hodor_database": "state"}
+    settings = load_settings(profile, {}, pytest.fail, adapter_type="trino")
+    assert (settings.database, settings.schema) == ("state", "ops")

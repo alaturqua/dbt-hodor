@@ -19,12 +19,12 @@ from dbt_hodor.store import StoreError
 Execute = Callable[[str], Sequence[Sequence[object]]]
 
 
-def quote_table(*parts: str) -> str:
+def quote_table(*parts: str, quote: str = "`") -> str:
     """`catalog`.`schema`.`table`; every part is validated, so quoting cannot be broken."""
     for part in parts:
         if not IDENT_RE.match(part):
             raise StoreError(f"invalid hodor name part {part!r}")
-    return ".".join(f"`{part}`" for part in parts)
+    return ".".join(f"{quote}{part}{quote}" for part in parts)
 
 
 def sql_literal(value: object) -> str:
@@ -40,7 +40,23 @@ def sql_literal(value: object) -> str:
     raise TypeError(f"unsupported literal type {type(value).__name__}")
 
 
+def trino_literal(value: object) -> str:
+    """Trino SQL literal: `'` is doubled and nothing else is escaped, so a backslash or a
+    newline passes through verbatim."""
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    return sql_literal(value)
+
+
 class DeltaStore:
+    # The Trino store changes these three: the identifier quote, the literal and the DDL dialect.
+    _quote = "`"
+    _dialect = "delta"
+
+    @staticmethod
+    def _literal(value: object) -> str:
+        return sql_literal(value)
+
     def __init__(
         self,
         database: str,
@@ -50,7 +66,7 @@ class DeltaStore:
         batch_size: int = 500,
         read_only: bool = False,
     ) -> None:
-        self._table = quote_table(database, schema, table)
+        self._table = quote_table(database, schema, table, quote=self._quote)
         self._execute = execute
         self._batch_size = batch_size
         if read_only:  # dbt-hodor explain: never create the table
@@ -63,7 +79,7 @@ class DeltaStore:
             pass
         try:
             # The schema is not created: it needs catalog-level grants, so it must already exist.
-            self._execute(create_table_sql(self._table, "delta"))
+            self._execute(create_table_sql(self._table, self._dialect))
         except Exception as exc:  # noqa: BLE001 - any adapter error means fail open
             raise StoreError(
                 f"cannot create hodor state table {self._table} (needs CREATE TABLE on the "
@@ -75,19 +91,19 @@ class DeltaStore:
     ) -> dict[str, Record]:
         sql = latest_builds_sql(
             self._table,
-            sql_literal(project_name),
-            sql_literal(target_name),
-            sql_literal(since_ms),
-            None if before_ms is None else sql_literal(before_ms),
+            self._literal(project_name),
+            self._literal(target_name),
+            self._literal(since_ms),
+            None if before_ms is None else self._literal(before_ms),
         )
         return {record.node_key: record for record in self._read(sql)}
 
     def invocation(
         self, project_name: str, target_name: str, invocation_id: str | None
     ) -> list[Record]:
-        invocation = None if invocation_id is None else sql_literal(invocation_id)
+        invocation = None if invocation_id is None else self._literal(invocation_id)
         sql = invocation_sql(
-            self._table, sql_literal(project_name), sql_literal(target_name), invocation
+            self._table, self._literal(project_name), self._literal(target_name), invocation
         )
         return self._read(sql)
 
@@ -103,7 +119,7 @@ class DeltaStore:
         for start in range(0, len(records), self._batch_size):
             batch = records[start : start + self._batch_size]
             values = ",\n".join(
-                "(" + ", ".join(sql_literal(v) for v in record.to_row()) + ")" for record in batch
+                "(" + ", ".join(self._literal(v) for v in record.to_row()) + ")" for record in batch
             )
             try:
                 self._execute(head + values)
@@ -115,7 +131,7 @@ class DeltaStore:
 
         VACUUM is left to the operator: it has its own retention rules.
         """
-        args = (sql_literal(project_name), sql_literal(target_name), sql_literal(before_ms))
+        args = (self._literal(project_name), self._literal(target_name), self._literal(before_ms))
         try:
             rows = self._execute(prune_sql(self._table, *args, delete=False))
             count = int(rows[0][0]) if rows else 0

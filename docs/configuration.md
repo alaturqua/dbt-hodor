@@ -38,9 +38,9 @@ Set them as keys on the active `profiles.yml` target. An environment variable ov
 | Profile key | Env var | Default | Values |
 | --- | --- | --- | --- |
 | `hodor_mode` | `HODOR_MODE` | `shadow` | `off`, `shadow`, `on` |
-| `hodor_store` | `HODOR_STORE` | `delta` | `delta`, `duckdb`, `postgres` (alias `lakebase`). `delta` needs the `databricks` adapter; on `duckdb` and `trino` set another store |
-| `hodor_database` | `HODOR_DATABASE` | the target's `catalog` (or `database`), for `delta` only | Databricks catalog, or Postgres database. Required for `postgres`: a Postgres database is unrelated to the dbt target, so it has no default. Not used by `duckdb` |
-| `hodor_schema` | `HODOR_SCHEMA` | none for `delta` and `postgres` (required); `main` for `duckdb` | schema name |
+| `hodor_store` | `HODOR_STORE` | `trino` on the `trino` adapter, `delta` on every other adapter | `delta`, `duckdb`, `postgres` (alias `lakebase`), `trino`. `delta` needs the `databricks` adapter and `trino` needs the `trino` adapter; with any other pairing hodor is off for the run. On `duckdb`, set `duckdb` or `postgres`. An unknown value warns and uses the adapter's default. |
+| `hodor_database` | `HODOR_DATABASE` | the target's `catalog` (or `database`), for `delta` and `trino` only | Databricks or Trino catalog, or Postgres database. Required for `postgres`: a Postgres database is unrelated to the dbt target, so it has no default. Not used by `duckdb` |
+| `hodor_schema` | `HODOR_SCHEMA` | none for `delta`, `trino` and `postgres` (required); `main` for `duckdb` | schema name |
 | `hodor_table` | `HODOR_TABLE` | `hodor_state` | table name |
 | `hodor_path` | `HODOR_PATH` | `.hodor/state.duckdb` | DuckDB database file, for `duckdb`. A relative path is relative to the dbt project root. |
 | `hodor_metadata_threads` | `HODOR_METADATA_THREADS` | `8` | 1-64 |
@@ -78,9 +78,9 @@ YAML reads unquoted `on` and `off` as booleans. hodor accepts both forms for `ho
 
 dbt State's own switches, `--manage-state` and `DBT_ENGINE_MANAGE_STATE`, do not apply. dbt-core 1.12 has neither: the flag fails, and the variable triggers dbt's `environment-variable-namespace-deprecation` warning. On dbt 1.13 and later they turn on dbt Labs' own dbt State.
 
-!!! warning "`delta` has no default schema"
+!!! warning "`delta` and `trino` have no default schema"
 
-    With the `delta` store, hodor needs `hodor_schema`, and a database from `hodor_database` or the target's catalog. Without them, hodor turns itself off for the run with a warning. It writes nothing to a catalog until someone names the schema.
+    With the `delta` or `trino` store, hodor needs `hodor_schema`, and a database from `hodor_database` or the target's catalog. Without them, hodor turns itself off for the run with a warning. It writes nothing to a catalog until someone names the schema.
 
 ## Example profile
 

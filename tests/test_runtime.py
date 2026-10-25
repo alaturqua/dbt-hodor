@@ -1,9 +1,12 @@
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 from dbt_hodor import providers, runtime
 from dbt_hodor.runtime import Runtime, model_kind, seed_hash
+from dbt_hodor.store.delta import DeltaStore
+from dbt_hodor.store.trino import TrinoStore
 
 
 def node(language="sql", **config):
@@ -54,6 +57,26 @@ def test_seed_hash_ignores_line_endings_and_sees_content(tmp_path):
     assert seed_hash(seed) != lf
 
 
+def _create_with_profile(monkeypatch, adapter_type, **profile):
+    created = []
+    stores = []
+
+    def init(self, invocation_id, settings, config, adapter, manifest, store, provider, state):
+        created.append(provider)
+
+    monkeypatch.setattr(
+        runtime, "_profile_settings", lambda config: {f"hodor_{k}": v for k, v in profile.items()}
+    )
+    monkeypatch.setattr(runtime, "get_flags", lambda: SimpleNamespace())
+    monkeypatch.setattr(
+        runtime, "open_store", lambda settings, *args, **kwargs: stores.append(settings.store)
+    )
+    monkeypatch.setattr(runtime.Runtime, "__init__", init)
+    adapter = SimpleNamespace(type=lambda: adapter_type)
+    result = runtime.Runtime.create(None, adapter, None, "inv")
+    return result, created, stores
+
+
 @pytest.mark.parametrize(
     ("adapter_type", "store", "expected"),
     [
@@ -61,8 +84,11 @@ def test_seed_hash_ignores_line_endings_and_sees_content(tmp_path):
         ("databricks", "duckdb", providers.DeltaProvider),
         ("duckdb", "duckdb", providers.DuckDBProvider),
         ("trino", "duckdb", providers.TrinoProvider),
+        ("trino", "trino", providers.TrinoProvider),
         ("duckdb", "delta", None),
         ("trino", "delta", None),
+        ("databricks", "trino", None),
+        ("duckdb", "trino", None),
         ("snowflake", "duckdb", None),
     ],
 )
@@ -77,12 +103,41 @@ def test_create_returns_none_before_opening_the_store_for_a_disallowed_pair(monk
     warnings = []
     profile = {"hodor_store": "delta", "hodor_database": "c", "hodor_schema": "s"}
     monkeypatch.setattr(runtime, "_profile_settings", lambda config: profile)
+    monkeypatch.setattr(runtime, "get_flags", lambda: SimpleNamespace())
     monkeypatch.setattr(runtime, "open_store", no_store)
     monkeypatch.setattr(runtime, "warn", warnings.append)
     adapter = SimpleNamespace(type=lambda: "trino")
     assert runtime.Runtime.create(None, adapter, None, "inv") is None
     assert len(warnings) == 1
     assert "store 'delta' needs the databricks adapter" in warnings[0]
+
+
+def test_trino_store_on_trino_opens_the_trino_store(monkeypatch):
+    result, created, stores = _create_with_profile(
+        monkeypatch, "trino", store="trino", database="c", schema="s"
+    )
+    assert result is not None
+    assert type(created[0]) is providers.TrinoProvider
+    assert stores == ["trino"]
+
+
+@pytest.mark.parametrize(("adapter_type", "store"), [("trino", "trino"), ("databricks", "delta")])
+def test_unset_store_follows_the_adapter(monkeypatch, adapter_type, store):
+    result, _, stores = _create_with_profile(monkeypatch, adapter_type, database="c", schema="s")
+    assert result is not None
+    assert stores == [store]
+
+
+def test_explicit_store_wins_over_the_adapter_default(monkeypatch):
+    result, _, stores = _create_with_profile(monkeypatch, "trino", store="duckdb", path=":memory:")
+    assert result is not None
+    assert stores == ["duckdb"]
+
+
+def test_unset_store_on_duckdb_stays_off(monkeypatch):
+    result, created, _ = _create_with_profile(monkeypatch, "duckdb", database="c", schema="s")
+    assert result is None
+    assert created == []
 
 
 def _create(monkeypatch, flags):
@@ -123,3 +178,20 @@ def test_flags_without_empty_still_proceed(monkeypatch):
     created, opened = _create(monkeypatch, SimpleNamespace())
     assert created is None  # the stub store fails open
     assert len(opened) == 1
+
+
+@pytest.mark.parametrize("store_class", [DeltaStore, TrinoStore])
+def test_failed_store_write_warns_and_does_not_raise(monkeypatch, store_class, record):
+    def execute(sql):
+        if sql.startswith("INSERT"):
+            raise RuntimeError("commit conflict")
+        return []
+
+    warnings = []
+    monkeypatch.setattr(runtime, "warn", warnings.append)
+    instance = object.__new__(runtime.Runtime)
+    instance.store = store_class("c", "s", "hodor_state", execute)
+    instance._lock = threading.Lock()
+    instance._warned = set()
+    instance._write([record(record_id="1"), record(record_id="2")])  # must not raise
+    assert warnings == ["dbt-hodor: cannot write hodor state: commit conflict; 2 records lost"]

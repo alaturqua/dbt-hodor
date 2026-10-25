@@ -196,9 +196,11 @@ def open_store(
             read_only,
         )
     from dbt_hodor.store.delta import DeltaStore
+    from dbt_hodor.store.trino import TrinoStore
 
     assert settings.database and settings.schema  # load_settings turns hodor off otherwise
-    return DeltaStore(
+    store_class = TrinoStore if settings.store == "trino" else DeltaStore
+    return store_class(
         settings.database,
         settings.schema,
         settings.table,
@@ -217,6 +219,12 @@ def provider_class_for(adapter_type: str, store: str) -> type[Provider] | None:
         warn(
             f"dbt-hodor is off: store 'delta' needs the databricks adapter, not "
             f"{adapter_type!r}; set hodor_store to duckdb or postgres"
+        )
+        return None
+    if store == "trino" and adapter_type != "trino":
+        warn(
+            f"dbt-hodor is off: store 'trino' needs the trino adapter, not "
+            f"{adapter_type!r}; set hodor_store to delta, duckdb or postgres"
         )
         return None
     return provider_class
@@ -322,8 +330,12 @@ class Runtime:
         invocation_id: str,
         state_manifest: Any = None,
     ) -> Runtime | None:
+        adapter_type = adapter.type()
         settings = load_settings(
-            _profile_settings(config), os.environ, lambda m: warn(f"dbt-hodor: {m}")
+            _profile_settings(config),
+            os.environ,
+            lambda m: warn(f"dbt-hodor: {m}"),
+            adapter_type=adapter_type,
         )
         if settings.mode == "off":
             info("dbt-hodor is off")
@@ -333,7 +345,7 @@ class Runtime:
             # normal run reuse them
             info("dbt-hodor is off for this --empty run")
             return None
-        provider_class = provider_class_for(adapter.type(), settings.store)
+        provider_class = provider_class_for(adapter_type, settings.store)
         if provider_class is None:
             return None
         provider = provider_class(adapter, debug)

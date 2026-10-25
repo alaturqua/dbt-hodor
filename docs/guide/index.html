@@ -803,9 +803,9 @@ models:
   <div class="tw"><table>
     <tr><th>Profile key</th><th>Env var</th><th>Default</th><th>Values</th></tr>
     <tr><td><code>hodor_mode</code></td><td><code>HODOR_MODE</code></td><td><code>shadow</code></td><td><code>off</code>, <code>shadow</code>, <code>on</code></td></tr>
-    <tr><td><code>hodor_store</code></td><td><code>HODOR_STORE</code></td><td><code>delta</code></td><td><code>delta</code>, <code>duckdb</code>, <code>postgres</code> (alias <code>lakebase</code>)</td></tr>
-    <tr><td><code>hodor_database</code></td><td><code>HODOR_DATABASE</code></td><td>the target's catalog, for <code>delta</code> only</td><td>Databricks catalog, or Postgres database (required); not used by <code>duckdb</code></td></tr>
-    <tr><td><code>hodor_schema</code></td><td><code>HODOR_SCHEMA</code></td><td>none for <code>delta</code> and <code>postgres</code> (required); <code>main</code> for <code>duckdb</code></td><td>schema name</td></tr>
+    <tr><td><code>hodor_store</code></td><td><code>HODOR_STORE</code></td><td><code>trino</code> on the <code>trino</code> adapter, <code>delta</code> on every other adapter</td><td><code>delta</code>, <code>duckdb</code>, <code>postgres</code> (alias <code>lakebase</code>), <code>trino</code></td></tr>
+    <tr><td><code>hodor_database</code></td><td><code>HODOR_DATABASE</code></td><td>the target's catalog, for <code>delta</code> and <code>trino</code> only</td><td>Databricks or Trino catalog, or Postgres database (required); not used by <code>duckdb</code></td></tr>
+    <tr><td><code>hodor_schema</code></td><td><code>HODOR_SCHEMA</code></td><td>none for <code>delta</code>, <code>trino</code> and <code>postgres</code> (required); <code>main</code> for <code>duckdb</code></td><td>schema name</td></tr>
     <tr><td><code>hodor_table</code></td><td><code>HODOR_TABLE</code></td><td><code>hodor_state</code></td><td>table name</td></tr>
     <tr><td><code>hodor_path</code></td><td><code>HODOR_PATH</code></td><td><code>.hodor/state.duckdb</code></td><td>DuckDB file, for <code>duckdb</code></td></tr>
     <tr><td><code>hodor_metadata_threads</code></td><td><code>HODOR_METADATA_THREADS</code></td><td><code>8</code></td><td>1 to 64</td></tr>
