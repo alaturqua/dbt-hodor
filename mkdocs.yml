@@ -90,6 +90,19 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Adapters:
+      - Overview: adapters/index.md
+      - Databricks: adapters/databricks.md
+      - Trino: adapters/trino.md
+      - Snowflake: adapters/snowflake.md
+      - DuckDB: adapters/duckdb.md
+  - State stores:
+      - Overview: stores/index.md
+      - delta: stores/delta.md
+      - trino: stores/trino.md
+      - duckdb: stores/duckdb.md
+      - postgres and Lakebase: stores/postgres.md
+      - Records and retention: stores/records.md
   - How it works:
       - Run flow: how-it-works/run-flow.md
       - Decision rules: how-it-works/decision-rules.md
@@ -98,7 +111,6 @@ nav:
       - Lineage: how-it-works/lineage.md
   - Guides:
       - Configuration: configuration.md
-      - State stores: stores.md
       - Operations: operations.md
       - Slim CI: slim-ci.md
       - Upgrading: upgrading.md

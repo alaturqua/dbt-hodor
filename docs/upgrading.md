@@ -13,9 +13,9 @@ Until 1.0, the settings and the record schema may change in a minor release.
 
 ### New
 
-- **Trino adapter.** hodor runs on `dbt-trino` 1.10.6 with the Iceberg and Delta Lake connectors. Data versions come from the Iceberg snapshot history and the Delta Lake commit history; see [Data versions](how-it-works/data-versions.md#trino-iceberg-and-delta-lake-connectors). The Iceberg connector was tested live on Trino 476 in Docker; the Delta Lake connector has unit tests only.
-- **Snowflake adapter.** hodor runs on `dbt-snowflake` 1.12.4. The data version of a table is the `SYSTEM$LAST_CHANGE_COMMIT_TIME` token plus the `created` and `last_ddl` times; see [Data versions](how-it-works/data-versions.md#snowflake). The state store on Snowflake is `duckdb` or `postgres` for now. A live test on a Snowflake account passed.
-- **`trino` store.** The state table lives in a Trino catalog, written through dbt's connection, in the catalog `hodor_database` (default: the target's `database`) and the schema `hodor_schema`. Without `hodor_schema`, hodor is off for the run with a warning, as for `delta`. See [State stores](stores.md#trino).
+- **Trino adapter.** hodor runs on `dbt-trino` 1.10.6 with the Iceberg and Delta Lake connectors. Data versions come from the Iceberg snapshot history and the Delta Lake commit history; see [Data versions](adapters/trino.md#data-version). The Iceberg connector was tested live on Trino 476 in Docker; the Delta Lake connector has unit tests only.
+- **Snowflake adapter.** hodor runs on `dbt-snowflake` 1.12.4. The data version of a table is the `SYSTEM$LAST_CHANGE_COMMIT_TIME` token plus the `created` and `last_ddl` times; see [Data versions](adapters/snowflake.md#data-version). The state store on Snowflake is `duckdb` or `postgres` for now. A live test on a Snowflake account passed.
+- **`trino` store.** The state table lives in a Trino catalog, written through dbt's connection, in the catalog `hodor_database` (default: the target's `database`) and the schema `hodor_schema`. Without `hodor_schema`, hodor is off for the run with a warning, as for `delta`. See [State stores](stores/trino.md).
 
 ## 0.2.0
 

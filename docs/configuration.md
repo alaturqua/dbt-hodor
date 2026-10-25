@@ -84,21 +84,4 @@ dbt State's own switches, `--manage-state` and `DBT_ENGINE_MANAGE_STATE`, do not
 
 ## Example profile
 
-```yaml
-# profiles.yml
-my_project:
-  target: prod
-  outputs:
-    prod:
-      type: databricks
-      catalog: my_catalog
-      # ... connection settings ...
-      hodor_mode: shadow
-      hodor_schema: ops
-      # state table: my_catalog.ops.hodor_state
-    local:
-      type: duckdb
-      path: dev.duckdb
-      hodor_store: duckdb
-      # state table: main.hodor_state in .hodor/state.duckdb
-```
+Each adapter page has a complete `profiles.yml` example in its Profile section: [Databricks](adapters/databricks.md#profile), [Trino](adapters/trino.md#profile), [Snowflake](adapters/snowflake.md#profile) and [DuckDB](adapters/duckdb.md#profile).
