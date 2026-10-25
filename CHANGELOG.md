@@ -5,6 +5,26 @@ and the project follows [semantic versioning](https://semver.org).
 
 Until 1.0 the settings and the record schema may change in a minor release.
 
+## [0.3.0] - 2026-10-25
+
+### Bug fixes
+
+- Snowflake follow-ups from the second review ([#15](https://github.com/alaturqua/dbt-hodor/issues/15))
+- Stand aside on --empty runs ([#11](https://github.com/alaturqua/dbt-hodor/issues/11))
+
+### Documentation
+
+- One page per adapter and per state store ([#16](https://github.com/alaturqua/dbt-hodor/issues/16))
+- List trino support as new and drop stale store limits ([#13](https://github.com/alaturqua/dbt-hodor/issues/13))
+- Add AGENTS.md and CLAUDE.md for coding agents ([#9](https://github.com/alaturqua/dbt-hodor/issues/9))
+
+### Features
+
+- Snowflake adapter support ([#14](https://github.com/alaturqua/dbt-hodor/issues/14))
+- Trino state store ([#12](https://github.com/alaturqua/dbt-hodor/issues/12))
+- Trino adapter support ([#10](https://github.com/alaturqua/dbt-hodor/issues/10))
+
+
 ## [0.2.0] - 2026-10-23
 
 ### Features

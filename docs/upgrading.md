@@ -4,7 +4,7 @@ What changes for a running project from one release to the next. Each release li
 
 Until 1.0, the settings and the record schema may change in a minor release.
 
-## Unreleased
+## 0.3.0
 
 ### Behavior changes
 
