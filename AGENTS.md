@@ -21,7 +21,8 @@ uv run --group docs mkdocs build --strict
 - `engine.py` stays pure: no I/O. Hashing, lineage, metadata and stores live in their own modules.
 - Fail open: every failure path ends in a build and never fails the dbt run.
 - A changed setting updates `docs/configuration.md` and the `README.md` table. The
-  interactive guide links to them and holds no settings table. A new reason code goes in `docs/how-it-works/decision-rules.md`.
+  interactive guide links to them and holds no settings table. A new reason code goes in
+  `docs/how-it-works/decision-rules.md`.
 - Docs: plain sentences, no hype, state limits. Claims must match tests that ran. Describe
   what the tool does; do not prescribe CI/CD design.
 - Adapter-specific text (profile, data version, limits) goes in `docs/adapters/<adapter>.md`;
