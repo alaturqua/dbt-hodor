@@ -21,7 +21,7 @@ hide:
 
 dbt-hodor is a free, self-hosted alternative to dbt Labs' [dbt State](https://docs.getdbt.com/docs/deploy/dbt-state-about). It runs inside dbt. For every selected node it decides whether to reuse the object that is already in the warehouse or to build it again. A node is reused when its logic has not changed and its upstream data has not changed since the last build.
 
-It needs no dbt platform account and sends nothing to external services. State lives in a Delta table on Databricks, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
+It needs no dbt platform account and sends nothing to external services. It supports the `databricks`, `trino`, `snowflake` and `duckdb` adapters: see [Adapters](adapters/index.md). State lives in a Delta table on Databricks, in a Trino table, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 
 !!! warning "Status: early development"
 
@@ -91,11 +91,19 @@ The [Slim CI](slim-ci.md) page has the setup. The [interactive guide](guide/inde
 
     [:octicons-arrow-right-24: Configuration](configuration.md)
 
+- :material-puzzle:{ .lg .middle } __Adapters__
+
+    ---
+
+    Databricks, Trino, Snowflake and DuckDB, with the data version each one reads.
+
+    [:octicons-arrow-right-24: Adapters](adapters/index.md)
+
 - :material-database:{ .lg .middle } __State stores__
 
     ---
 
-    Delta on Databricks, Postgres or Lakebase, or a local DuckDB file.
+    Delta on Databricks, Trino, Postgres or Lakebase, or a local DuckDB file.
 
     [:octicons-arrow-right-24: State stores](stores/index.md)
 
@@ -127,5 +135,7 @@ The [Slim CI](slim-ci.md) page has the setup. The [interactive guide](guide/inde
 | `dbt-hodor explain` CLI | built, tested end to end on dbt-duckdb; not yet run live on Databricks |
 | `dbt-hodor prune` CLI | built, tested end to end on dbt-duckdb |
 | `postgres` store, Lakebase included | built, tested end to end against Lakebase (`pytest -m postgres`) |
+| `trino` store and Trino data versions | built; Iceberg tested live on Trino 476 in Docker, Delta Lake connector unit-tested only |
+| Snowflake adapter | built; tested live on Snowflake 10.38, with state in DuckDB or Postgres |
 | Slim CI: `--defer`, `--favor-state`, environment-neutral hash | built, tested end to end on dbt-duckdb and live on Databricks |
 | PyPI package | [published](https://pypi.org/project/dbt-hodor/) |

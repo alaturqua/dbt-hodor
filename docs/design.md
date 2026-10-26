@@ -11,7 +11,7 @@ Requirements:
 
 - Runs inside dbt-core 1.12.x with dbt-databricks 1.12.7 on Unity Catalog. Development and tests use dbt-core 1.12.5.
 - Needs no dbt platform account and sends nothing to external services.
-- Stores state in a Delta table (default on Databricks), in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
+- Stores state in a Delta table (default on Databricks), in a Trino table, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 - Uses the dbt State model configs (`state:` block), so projects can switch between the two.
 - Works in Databricks `dbt_task` jobs. Every command in a `dbt_task` must start with `dbt` (`databricks/sdk/service/jobs.py:1562`), so a wrapper CLI is not an option. hodor must load inside the dbt process.
 - Supported adapters: `databricks` for real environments, and `duckdb` (dbt-duckdb) for local development and tests. Local work runs end to end on DuckDB, with no Databricks access. `trino` (dbt-trino) is supported for the Iceberg and Delta Lake connectors (Delta Lake connector: unit tests only). `snowflake` (dbt-snowflake 1.12.4) is supported with the state in DuckDB or Postgres. hodor disables itself on any other adapter, and on any adapter other than `databricks` when the store is `delta`.
@@ -28,7 +28,7 @@ Main target: large scheduled dbt runs on Databricks that rebuild every model in 
 
 ## 3. Scope
 
-### In v1
+### In scope
 
 - Per-node decision for `dbt run`, `dbt build`, `dbt test`, `dbt seed` and `dbt snapshot`: reuse or build.
 - Models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where) and `view`. An unset incremental strategy counts as merge, the dbt-databricks default (upstream wrongly maps it to append). Custom strategies build as unsupported. These are the dbt-databricks 1.12.7 strategies (`valid_incremental_strategies`, `impl.py:962`) except `microbatch`.
@@ -37,10 +37,10 @@ Main target: large scheduled dbt runs on Databricks that rebuild every model in 
 - Model configs `lag_tolerance`, `require_fresh_data_from`, `compare_unrendered_code`, `execute_hooks_on_any_reuse`.
 - `--full-refresh` always builds.
 - Modes `off`, `shadow` (decide and record, but always build) and `on`.
-- State stores `delta` and `duckdb`.
+- State stores `delta`, `trino`, `duckdb` and `postgres` (alias `lakebase`).
 - `dbt-hodor explain` and `dbt-hodor prune`.
 
-### Out of v1, always built as normal dbt
+### Out of scope, always built as normal dbt
 
 - The node configs `pre_clone`, `allow_clones` and `defer_to_target`, and `state:*` selectors backed by hodor. dbt's own `--defer` is supported (see [Slim CI](slim-ci.md)).
 - Python models, microbatch models, materialized views, streaming tables, metric views, custom materializations and unit tests. Reasons: microbatch windows depend on the run time, so a reuse could skip a new window; Python models have no SQL to trace inputs from; dbt-databricks already turns an unchanged metric view into `select 1`; unit tests may come later.
@@ -71,7 +71,7 @@ Each unit has one job:
 - **hashing.py** turns compiled SQL plus config into stable hashes.
 - **lineage.py** and **metadata.py** answer one question per table: what is its current data version, and when did its data last change?
 - **store/** loads the latest records at run start and appends new records. It knows nothing about decisions.
-- **plugin.py**, **state_config.py** and **patches.py** are the only modules that touch dbt internals. `state_config.py` holds the one upstream-derived piece of logic, the `state:` config merge, on its own so the attribution is precise. They are derived from upstream `plugin.py` and `runner.py`, keep their Apache-2.0 headers, and are trimmed to what v1 needs. Nothing is taken from upstream's `run_cache.py`: hodor's engine replaces it.
+- **plugin.py**, **state_config.py** and **patches.py** are the only modules that touch dbt internals. `state_config.py` holds the one upstream-derived piece of logic, the `state:` config merge, on its own so the attribution is precise. They are derived from upstream `plugin.py` and `runner.py`, keep their Apache-2.0 headers, and are trimmed to what hodor needs. Nothing is taken from upstream's `run_cache.py`: hodor's engine replaces it.
 
 The upstream gRPC, auth, telemetry, dispatcher, session and version-check code (about 2,000 lines) is not carried over. Neither are the upstream request and response models: the engine uses small dataclasses of its own.
 
@@ -265,7 +265,7 @@ Any Postgres, Databricks Lakebase included. `lakebase` is an alias for `postgres
 | compare_unrendered_code | `false` | boolean |
 | execute_hooks_on_any_reuse | `false` | boolean. `execute_hooks_on_reuse`, the spelling in the dbt-core 1.12.5 schema, is also accepted |
 | evaluate_volatile_sql | auto | boolean. Auto: volatile functions that decide rows or values are upstreams (`volatile:date`, `volatile:session`, `volatile:always`), stamp columns are not. `true`: stamps count too. `false`: nothing counts |
-| pre_clone | ignored in v1 | warning once |
+| pre_clone | ignored | warning once |
 
 - **Where to set them:** in YAML (`dbt_project.yml` `+state:` or the model properties file). dbt-core 1.12.5 warns (D027) about these keys in SQL `config()`.
 - **Merging:** hodor installs upstream's merge patch, so `state:` is merged key by key across project, folder and model levels (upstream `plugin.py:170-229`).

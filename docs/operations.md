@@ -95,7 +95,7 @@ Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
 - **DuckDB state file.** One process at a time.
 - **Databricks.** Not yet run in a large production project. Delta paths on Volumes are not tested.
 
-## Scope of v1
+## Scope
 
 Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular). Adapters: `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 (Iceberg and Delta Lake connectors only; see [Data versions](adapters/trino.md#data-version)) and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](adapters/snowflake.md#data-version)), with dbt-core 1.12.x.
 

@@ -456,7 +456,7 @@ svg.door { width:100%; max-height:250px; }
       </div>
     </div>
   </div>
-  <div class="note"><b>Status: early development.</b> The engine and the stores pass end-to-end tests on dbt-duckdb, and a live test on a Databricks Unity Catalog workspace. It has not run in a large production project yet. Start in shadow mode (tab 8) to see its decisions before it skips anything.</div>
+  <div class="note"><b>Status: early development.</b> The engine and the stores pass end-to-end tests on dbt-duckdb, and live tests on Databricks, Trino (Iceberg) and Snowflake. It has not run in a large production project yet. Start in shadow mode (tab 8) to see its decisions before it skips anything.</div>
 </section>
 
 <!-- 2 NAME -->
@@ -766,7 +766,7 @@ svg.door { width:100%; max-height:250px; }
       <button class="btn" type="button" data-to="d-reasons">Reason codes</button>
       <button class="btn" type="button" data-to="d-cli">CLI</button>
       <button class="btn" type="button" data-to="d-ci">Slim CI</button>
-      <button class="btn" type="button" data-to="d-scope">Scope of v1</button>
+      <button class="btn" type="button" data-to="d-scope">Scope</button>
       <button class="btn" type="button" data-to="d-limit">Known limit</button>
     </div>
     <div class="docbody" id="docbody" tabindex="0" role="region" aria-label="Docs">
@@ -821,7 +821,7 @@ Run again with --yes to delete them.</code></pre>
   <h3 id="d-ci">Slim CI</h3>
   <p>hodor works with <code>-s state:modified+ --defer --state &lt;prod manifest&gt;</code>, with or without <code>--favor-state</code>. Catalog and schema names of the project's own nodes are replaced by the node's id before hashing, so a CI catalog or a schema per pull request, under any naming scheme, is not a code change. Each push reuses what the last push built. A table made by <code>dbt clone</code> has no hodor record, so it builds once, then is reused. A deploy compares only with the target's own history. Try it in the Slim CI tab.</p>
 
-  <h3 id="d-scope">Scope of v1</h3>
+  <h3 id="d-scope">Scope</h3>
   <p>Commands: <code>run</code>, <code>build</code>, <code>test</code>, <code>seed</code> and <code>snapshot</code>.</p>
   <p>Supported: models materialized as <code>table</code>, <code>incremental</code> and <code>view</code>, plus seeds, snapshots and data tests. Incremental strategies: <code>append</code>, <code>merge</code>, <code>delete+insert</code>, <code>insert_overwrite</code> and <code>replace_where</code>; an unset strategy counts as <code>merge</code>.</p>
   <p>Built as plain dbt: Python models, microbatch, materialized views, streaming tables, metric views, custom materializations, custom incremental strategies and unit tests.</p>

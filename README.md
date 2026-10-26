@@ -154,7 +154,7 @@ my_project:
 
 The state table decides what gets skipped in prod. Grant `MODIFY` on it only to the job service principals.
 
-## Scope of v1
+## Scope
 
 Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular), on `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](docs/adapters/snowflake.md#data-version)), with dbt-core 1.12.x. Trino support covers the Iceberg and Delta Lake connectors; see [Data versions](docs/adapters/trino.md#data-version).
 
