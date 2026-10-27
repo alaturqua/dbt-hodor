@@ -170,7 +170,7 @@ A data version is an opaque text token. The engine only compares tokens for equa
 
 - Known maintenance and metadata operations never count as a data change: OPTIMIZE, VACUUM START, VACUUM END, ANALYZE, COMPUTE STATS, SET TBLPROPERTIES, UNSET TBLPROPERTIES, CHANGE COLUMN (column comments from `persist_docs`), ADD CONSTRAINT, DROP CONSTRAINT, UPGRADE PROTOCOL, SET TAGS, UNSET TAGS, CLUSTER BY, REORG, FSCK.
 - Every other operation counts as a data change, unless its change metrics are all zero. The change metrics are `numOutputRows`, `numRemovedFiles`, `numTargetRowsInserted`, `numTargetRowsUpdated`, `numTargetRowsDeleted`, `numDeletedRows`, `numUpdatedRows` and `numCopiedRows`. A commit without any of them counts as a change. `numRemovedFiles` is there because a `CREATE OR REPLACE TABLE` or `INSERT OVERWRITE` that writes 0 rows shows `numOutputRows` at 0 but still empties the table.
-- The token is the version and the commit time of the latest data-change commit, for example `7@1792465200000`. The commit time matters: a table that is dropped and recreated, or swapped in from a staging table (`use_safer_relation_operations` with `use_materialization_v2`), restarts its versions, so the version alone can repeat after a real change. If the history window (`LIMIT 20`) holds no data-change commit, the version is unknown, so dependents build.
+- The token is the version and the commit time of the latest data-change commit, for example `7@1792465200000`. The commit time matters: a table that is dropped and recreated, or swapped in from a staging table (`use_safer_relation_operations` with `use_materialization_v2`), restarts its versions, so the version alone can repeat after a real change. If the history window (`LIMIT 20`) holds no data-change commit, hodor reads up to 1000 commits once more; if those hold none either, the version is unknown, so dependents build.
 - Unknown operations count as changes on purpose: a new Delta operation name can cause extra builds, never wrong reuses. The spike (section 11) confirms operation names and how zero-row writes appear.
 
 **DuckDB (content fingerprint).** DuckDB has no table history. The token is the row count plus an order-independent sum of row hashes, computed with one query per table. That is fine for local test data sizes.
@@ -191,7 +191,7 @@ A data version is an opaque text token. The engine only compares tokens for equa
 ### 7.3 Cost control
 
 - One query per catalog against `system.information_schema.tables` gives `last_altered` for all relevant tables. A table whose `last_altered` is not newer than the time it was last checked is unchanged and needs no history query. This shortcut is used only if the spike shows that `last_altered` moves on every commit that writes data. The spike showed it does not (section 11.1), so the shortcut is not used.
-- Every other table gets `DESCRIBE HISTORY <t> LIMIT 20`, run in parallel on a small thread pool (default 8) and cached for the run.
+- Every other table gets `DESCRIBE HISTORY <t> LIMIT 20` (`LIMIT 1000` once more when the 20 hold only maintenance commits), run in parallel on a small thread pool (default 8) and cached for the run.
 - After hodor builds a table, it reads that table's history once and updates the cache, so downstream nodes in the same run see the new version.
 - `metadata.py` stays behind a small interface (`versions(tables) -> {table: DataVersion}`), so the shortcut can be switched on or off without touching the engine.
 

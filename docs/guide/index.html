@@ -625,7 +625,7 @@ svg.door { width:100%; max-height:250px; }
         <p><code>OPTIMIZE</code>, <code>VACUUM START</code>, <code>VACUUM END</code>, <code>ANALYZE</code>, <code>COMPUTE STATS</code>, <code>SET TBLPROPERTIES</code>, <code>UNSET TBLPROPERTIES</code>, <code>CHANGE COLUMN</code>, <code>ADD CONSTRAINT</code>, <code>DROP CONSTRAINT</code>, <code>UPGRADE PROTOCOL</code>, <code>SET TAGS</code>, <code>UNSET TAGS</code>, <code>CLUSTER BY</code>, <code>REORG</code>, <code>FSCK</code>.</p>
         <details class="more"><summary>Change metrics and the commit window</summary>
           <p class="small">Change metrics that decide the zero-row case: <code>numOutputRows</code>, <code>numRemovedFiles</code>, <code>numTargetRowsInserted</code>, <code>numTargetRowsUpdated</code>, <code>numTargetRowsDeleted</code>, <code>numDeletedRows</code>, <code>numUpdatedRows</code>, <code>numCopiedRows</code>. A commit with none of them counts as a change. A replace that writes 0 rows still removes the old files, so it counts: the table is now empty.</p>
-          <p class="small">Only the newest 20 commits are read (<code>DESCRIBE HISTORY ... LIMIT 20</code>). If none of them changed data, the version is unknown and dependents build. An unknown operation name counts as a change: that can cause an extra build, never a wrong reuse.</p>
+          <p class="small">The newest 20 commits are read first (<code>DESCRIBE HISTORY ... LIMIT 20</code>). If none of them changed data, up to 1000 are read once more. If those hold no data change either, the version is unknown and dependents build. An unknown operation name counts as a change: that can cause an extra build, never a wrong reuse.</p>
         </details>
       </div>
       <div class="card">

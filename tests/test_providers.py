@@ -141,6 +141,37 @@ def test_delta_provider_reads_history_with_backtick_quoting():
     assert adapter.queries[-1] == "DESCRIBE HISTORY delta.`/Volumes/Cat/raw/x` LIMIT 20"
 
 
+def _maintenance_then_write(sql):
+    """25 OPTIMIZE commits on top of one write; the answer honours the LIMIT."""
+    limit = int(sql.rsplit(" ", 1)[1])
+    t = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    rows = [(v, t, "OPTIMIZE", {"numRemovedFiles": "3"}) for v in range(30, 5, -1)]
+    rows.append((5, t, "WRITE", {"numOutputRows": "2"}))
+    return ["version", "timestamp", "operation", "operationMetrics"], rows[:limit]
+
+
+def test_delta_history_reads_further_back_when_the_window_holds_only_maintenance():
+    adapter = FakeAdapter(_maintenance_then_write)
+    version = DeltaProvider(adapter).version("cat.sch.t")
+    assert (
+        version.token == f"5@{int(datetime(2026, 10, 20, tzinfo=timezone.utc).timestamp() * 1000)}"
+    )
+    assert adapter.queries == [
+        "DESCRIBE HISTORY `cat`.`sch`.`t` LIMIT 20",
+        "DESCRIBE HISTORY `cat`.`sch`.`t` LIMIT 1000",
+    ]
+
+
+def test_delta_short_history_without_data_change_stays_unknown():
+    t = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    rows = [(v, t, "OPTIMIZE", {"numRemovedFiles": "3"}) for v in range(3)]
+    adapter = FakeAdapter(
+        lambda sql: (["version", "timestamp", "operation", "operationMetrics"], rows)
+    )
+    assert DeltaProvider(adapter).version("cat.sch.t") == UNKNOWN
+    assert len(adapter.queries) == 1  # the whole history was read: nothing further back
+
+
 def test_clock_and_store_executor():
     adapter = FakeAdapter(lambda sql: (["now"], [(1_760_000_000_000,)]))
     assert DeltaProvider(adapter).now_ms() == 1_760_000_000_000
