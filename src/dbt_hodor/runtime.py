@@ -756,6 +756,17 @@ class Runtime:
         rendered = (get_rendered(hook.get("sql") or "", context, model).strip() for hook in hooks)
         return [sql for sql in rendered if sql]
 
+    def _refresh(self, model: Any) -> DataVersion:
+        """Re-read the version after any build, also one hodor did not decide (Python,
+        microbatch, hodor_error): children in this run must not compare a cached version
+        from before the build."""
+        node = self.graph.get(model.unique_id)
+        if node is None or not node.relation or node.materialized == "ephemeral":
+            return UNKNOWN
+        if (node.materialized or "view") == "view":
+            return self.provider.refresh(VIEW_PREFIX + node.relation)
+        return self.provider.refresh(node.relation)
+
     def execute_model(self, runner: Any, model: Any, manifest: Any, original: Callable) -> Any:
         resource_type = _value(model.resource_type)
         if (
@@ -764,7 +775,9 @@ class Runtime:
             # `dbt seed --show` prints each result's agate table, which a reuse does not load
             or (resource_type == "seed" and getattr(get_flags(), "SHOW", False))
         ):
-            return original(runner, model, manifest)
+            result = original(runner, model, manifest)
+            self._refresh(model)
+            return result
         relation = _relation(model)
         hooks: list[str] = []  # rendered while deciding, run on reuse
         plan = self._plan(
@@ -787,11 +800,7 @@ class Runtime:
             self._record(model, plan, BUILD, "error", built_at_ms=plan.started_ms)
             raise
         self._count(plan)
-        version = UNKNOWN
-        if plan.facts is not None and plan.facts.kind in OWN_DATA_KINDS and relation:
-            version = self.provider.refresh(relation)
-        elif plan.facts is not None and plan.facts.kind == "view" and relation:
-            version = self.provider.refresh(VIEW_PREFIX + relation)
+        version = self._refresh(model)
         self._record(
             model,
             plan,
@@ -932,8 +941,26 @@ def start_runtime(task: Any, selected_uids: Any) -> None:
             warn(f"dbt-hodor: cannot read the --state manifest: {exc}")
     with adapter.connection_named("hodor"):
         runtime = get_runtime(task.config, adapter, task.manifest, state_manifest)
-    if runtime is not None:
-        runtime.prefetch(selected_uids)
+    if runtime is None:
+        return
+    if _has_start_hooks(task):
+        # on-run-start runs after this and may write to the tables a prefetch would read;
+        # each node reads its versions when it runs instead
+        debug("dbt-hodor: on-run-start hooks, data versions are read per node")
+        return
+    runtime.prefetch(selected_uids)
+
+
+def _has_start_hooks(task: Any) -> bool:
+    get_hooks = getattr(task, "get_hooks_by_type", None)
+    if get_hooks is None:  # only RunTask and its subclasses run on-run-start
+        return False
+    try:
+        from dbt.node_types import RunHookType
+
+        return bool(get_hooks(RunHookType.Start))
+    except Exception:  # noqa: BLE001 - unknown: no prefetch, which is slower, never stale
+        return True
 
 
 def current_runtime() -> Runtime | None:

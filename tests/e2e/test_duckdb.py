@@ -530,3 +530,43 @@ def test_prune_is_a_dry_run_until_yes(project, capsys):
     dbt(root)
     reasons = decisions(state)
     assert reasons and all(reason == "no_history" for _, reason in reasons.values())
+
+
+PYTHON_PARENT = {
+    "models/py_orders.py": """
+        def model(dbt, session):
+            dbt.config(materialized="table")
+            return dbt.source("raw", "orders")
+    """,
+    "models/py_child.sql": "{{ config(materialized='table') }} select count(*) as n from "
+    "{{ ref('py_orders') }}",
+}
+
+
+def test_child_of_an_unsupported_parent_sees_the_parent_build(project):
+    root, warehouse, state = project
+    for name, body in PYTHON_PARENT.items():
+        (root / name).write_text(textwrap.dedent(body).strip() + "\n", encoding="utf-8")
+    dbt(root)
+    dbt(root, "-s", "py_child")  # the child's record catches up with the parent's table
+
+    # the Python parent always builds; its new data must reach the child in the same run
+    with duckdb.connect(str(warehouse)) as con:
+        con.execute("insert into raw.orders values (3, 30)")
+    dbt(root)
+    assert decisions(state)["py_child"] == ("build", "new_upstream_data")
+    with duckdb.connect(str(warehouse)) as con:
+        assert con.execute("select n from main.py_child").fetchone()[0] == 3
+
+
+def test_on_run_start_writes_are_seen(project):
+    root, warehouse, state = project
+    dbt(root)
+    project_file = root / "dbt_project.yml"
+    project_file.write_text(
+        project_file.read_text() + 'on-run-start: "insert into raw.orders values (3, 30)"\n'
+    )
+    dbt(root)
+    assert decisions(state)["fct_orders"] == ("build", "new_upstream_data")
+    with duckdb.connect(str(warehouse)) as con:
+        assert con.execute("select count(*) from main.fct_orders").fetchone()[0] == 3
