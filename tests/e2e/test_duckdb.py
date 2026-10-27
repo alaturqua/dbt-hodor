@@ -613,7 +613,10 @@ def test_long_reused_nodes_keep_their_build_record(project, capsys):
     assert dbt(root)["fct_orders"][0] == "reused"
     _age_records(state, 60)  # the first build is now outside the window
     assert dbt(root)["fct_orders"] == ("reused", "REUSED (no_new_data)")
-    assert decisions(state)["dim_country"] == ("reuse", "no_new_data")
+    now = decisions(state)
+    assert now["dim_country"] == ("reuse", "no_new_data")
+    tests = [k for k in now if k.startswith("test.")]
+    assert tests and all(now[t] == ("reuse", "no_new_data") for t in tests)  # tests carry too
 
     # explain lists what the run did, not the carried copies
     explain = ["explain", "--project-dir", str(root), "--profiles-dir", str(root)]
