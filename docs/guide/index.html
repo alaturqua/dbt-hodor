@@ -798,7 +798,7 @@ pip install "dbt-hodor[duckdb]"</code></pre>
   <div class="tw"><table id="reasons"><tr><th>#</th><th>Reason</th><th>Decision</th></tr></table></div>
 
   <h3 id="d-cli">CLI</h3>
-  <p><code>dbt-hodor explain</code> shows why each node of the latest run was reused or built: the reason, the last build it was compared with, the code and config hashes then and now, and each upstream data version then and now. It only reads the state table. Options: <code>-s</code> (a unique_id, a relation or a name; repeat for more nodes), <code>--invocation</code>, <code>--json</code>, and dbt's <code>--project-dir</code>, <code>--profiles-dir</code>, <code>--profile</code> and <code>-t</code>. Try it in the Simulator tab.</p>
+  <p><code>dbt-hodor explain</code> shows why each node of the latest run was reused or built: the reason, the last build it was compared with, the code and config hashes then and now, and each upstream data version then and now. It only reads the state table. Options: <code>-s</code> (a unique_id, a relation or a name; repeat for more nodes), <code>--invocation</code>, <code>--json</code>, <code>--summary</code> (counts per reason and the changed upstreams behind the builds), and dbt's <code>--project-dir</code>, <code>--profiles-dir</code>, <code>--profile</code> and <code>-t</code>. Try it in the Simulator tab.</p>
 <pre><code>$ dbt-hodor explain -s fct_orders
 dbt-hodor explain: hodor_e2e/local, invocation 7d1e4b90-... (2026-10-21 20:42 UTC), 1 node
 model.hodor_e2e.fct_orders: build (new_upstream_data)

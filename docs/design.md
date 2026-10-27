@@ -293,7 +293,7 @@ Set as keys on the active `profiles.yml` target. An environment variable of the 
 
 ### 9.3 CLI
 
-`dbt-hodor explain [-s <unique_id or name>] [--invocation <id>] [--json]` reads decisions from the store configured for the current project and target:
+`dbt-hodor explain [-s <unique_id or name>] [--invocation <id>] [--json] [--summary]` reads decisions from the store configured for the current project and target:
 
 - `duckdb`: directly;
 - `delta`: through `databricks-sql-connector`, using the profile's connection settings. The connector is already a dependency of dbt-databricks.

@@ -494,6 +494,18 @@ def test_explain_reads_the_state_of_the_project_and_target(project, capsys):
     changed = [u for u in fct["upstreams"] if u["last"] != u["now"]]
     assert [u["table"].split(".")[-1] for u in changed] == ["orders"]
 
+    capsys.readouterr()
+    assert cli.main([*explain, "--summary", "--json"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert {"decision": "build", "reason": "new_upstream_data", "count": 3} in summary["reasons"]
+    # the source write rebuilt fct_orders, whose build reran its two tests
+    assert [
+        (t["table"].split(".")[-1], t["built_in_run"], t["nodes"]) for t in summary["triggers"]
+    ] == [
+        ("fct_orders", True, 2),
+        ("orders", False, 1),
+    ]
+
     first = fct["last_build"]["invocation_id"]
     assert cli.main([*explain, "--invocation", first, "-s", "fct_orders", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["invocation_id"] == first
