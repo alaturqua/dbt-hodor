@@ -46,6 +46,8 @@ The sha256 of the node config (which holds the contract settings and Databricks 
 
 The config hash also holds the `macro_sql` of the project and package macros that the node's materialization or its hooks run, found through dbt's macro dependencies. A project override of `create_table_as` that adds an audit column, a materialization from a package, or a macro called in a `post_hook` therefore rebuilds the nodes that run it, with `config_changed`. An override used by every table rebuilds every table. dbt's and the adapter's own macros are left out, so an adapter upgrade does not rebuild every node.
 
+The config hash also holds the code hash of each rendered `pre_hook` and `post_hook`. Before hashing, this run's `invocation_id` and `run_started_at` values are replaced with placeholders, as in step 2 of the code hash, so an audit hook such as `insert into audit values ('{{ invocation_id }}')` does not rebuild the node on every run. A reused node does not run its hooks unless `execute_hooks_on_any_reuse` is `true`.
+
 ## Unrendered hash
 
 Used only with `compare_unrendered_code`. It is the sha256 of `raw_code`, the `macro_sql` of every macro in `depends_on.macros` (resolved recursively), and `unrendered_config`.

@@ -570,3 +570,16 @@ def test_on_run_start_writes_are_seen(project):
     assert decisions(state)["fct_orders"] == ("build", "new_upstream_data")
     with duckdb.connect(str(warehouse)) as con:
         assert con.execute("select count(*) from main.fct_orders").fetchone()[0] == 3
+
+
+def test_hooks_with_run_values_do_not_rebuild(project):
+    root, _, state = project
+    (root / "models" / "audited.sql").write_text(
+        "{{ config(materialized='table', post_hook=\"insert into main.audit select 1 "
+        "where '{{ invocation_id }}' <> '{{ run_started_at }}'\") }}\n"
+        "select id from {{ ref('stg_orders') }}\n",
+        encoding="utf-8",
+    )
+    dbt(root)
+    dbt(root)
+    assert decisions(state)["audited"] == ("reuse", "no_new_data")

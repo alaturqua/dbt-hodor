@@ -37,6 +37,7 @@ from dbt_hodor.hashing import (
     analyze_node_sql,
     analyze_sql,
     config_hash,
+    normalize_runtime_values,
     unrendered_hash,
 )
 from dbt_hodor.lineage import GraphNode, Lineage, external_inputs, normalize_relation
@@ -459,8 +460,14 @@ class Runtime:
             columns,
             constraints,
             self._execution_macros(node),
-            [analyze_sql(sql, self.dialect, self.relations).code_hash for sql in hooks],
+            [self._hook_hash(sql) for sql in hooks],
         )
+
+    def _hook_hash(self, sql: str) -> str:
+        """A hook's code hash without the values that change every run, such as an audit
+        insert of {{ invocation_id }}. On reuse the hooks do not run by default."""
+        sql = normalize_runtime_values(sql, self.invocation_id, self.run_started_at)
+        return analyze_sql(sql, self.dialect, self.relations).code_hash
 
     def _volatile_groups(
         self, cfg: NodeStateConfig, analysis: SqlAnalysis
