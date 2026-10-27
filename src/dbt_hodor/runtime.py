@@ -782,12 +782,16 @@ class Runtime:
         """Re-read the version after any build, also one hodor did not decide (Python,
         microbatch, hodor_error): children in this run must not compare a cached version
         from before the build."""
-        node = self.graph.get(model.unique_id)
-        if node is None or not node.relation or node.materialized == "ephemeral":
+        try:
+            node = self.graph.get(model.unique_id)
+            if node is None or not node.relation or node.materialized == "ephemeral":
+                return UNKNOWN
+            if (node.materialized or "view") == "view":
+                return self.provider.refresh(VIEW_PREFIX + node.relation)
+            return self.provider.refresh(node.relation)
+        except Exception as exc:  # noqa: BLE001 - the build succeeded; never fail the run here
+            self.warn_once(f"cannot read the data version of {model.unique_id}: {exc}")
             return UNKNOWN
-        if (node.materialized or "view") == "view":
-            return self.provider.refresh(VIEW_PREFIX + node.relation)
-        return self.provider.refresh(node.relation)
 
     def execute_model(self, runner: Any, model: Any, manifest: Any, original: Callable) -> Any:
         resource_type = _value(model.resource_type)

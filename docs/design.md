@@ -223,7 +223,7 @@ Portable types only: text and bigint, with JSON stored as text. Times are epoch 
 | test_result | text (JSON) | status, failures, message (tests only) |
 | hodor_version | text | package version |
 
-**Load at run start**: the latest successful `build` record per `node_key`, for the project and target, within the lookback window (`hodor_lookback_days`, default 90), in one query. Successful means action `build` and status `success`, `pass`, `warn` or `fail`. The query uses a `ROW_NUMBER()` subquery, not `QUALIFY`, because Postgres has no `QUALIFY`. Shadow-mode builds count, so shadow mode builds the history that `on` mode needs.
+**Load at run start**: the latest successful `build` record per `node_key`, for the project and target, within the lookback window (`hodor_lookback_days`, default 90), in one query. Successful means action `build` (or `carry`, a copy of a build record that a long-reused node writes after half the window) and status `success`, `pass`, `warn` or `fail`. The query uses a `ROW_NUMBER()` subquery, not `QUALIFY`, because Postgres has no `QUALIFY`. Shadow-mode builds count, so shadow mode builds the history that `on` mode needs.
 
 **False reuse** (section 14): a record with mode `shadow`, decision `reuse`, and a `data_version` that differs from the node's previous build record.
 
