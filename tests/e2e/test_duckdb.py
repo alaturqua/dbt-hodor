@@ -141,7 +141,7 @@ def records(state: Path, invocation: int | None = None) -> list[tuple]:
     with duckdb.connect(str(state), read_only=True) as con:
         return con.execute(
             "select unique_id, mode, decision, reason, action, status from main.hodor_state "
-            "order by recorded_at_ms, unique_id"
+            "where action <> 'carry' order by recorded_at_ms, unique_id"
         ).fetchall()
 
 
@@ -583,3 +583,30 @@ def test_hooks_with_run_values_do_not_rebuild(project):
     dbt(root)
     dbt(root)
     assert decisions(state)["audited"] == ("reuse", "no_new_data")
+
+
+def _age_records(state: Path, days: int) -> None:
+    with duckdb.connect(str(state)) as con:
+        con.execute(
+            "update main.hodor_state set recorded_at_ms = recorded_at_ms - ?, "
+            "built_at_ms = built_at_ms - ?",
+            [days * 86_400_000] * 2,
+        )
+
+
+def test_long_reused_nodes_keep_their_build_record(project, capsys):
+    root, _, state = project
+    dbt(root)
+    _age_records(state, 60)  # older than half of hodor_lookback_days (90)
+    assert dbt(root)["fct_orders"][0] == "reused"
+    _age_records(state, 60)  # the first build is now outside the window
+    assert dbt(root)["fct_orders"] == ("reused", "REUSED (no_new_data)")
+    assert decisions(state)["dim_country"] == ("reuse", "no_new_data")
+
+    # explain lists what the run did, not the carried copies
+    explain = ["explain", "--project-dir", str(root), "--profiles-dir", str(root)]
+    capsys.readouterr()
+    assert cli.main([*explain, "-s", "fct_orders", "--json"]) == 0
+    (fct,) = json.loads(capsys.readouterr().out)["nodes"]
+    assert (fct["action"], fct["reason"]) == ("reuse", "no_new_data")
+    assert fct["last_build"] is not None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import threading
@@ -51,7 +52,7 @@ from dbt_hodor.providers import (
     TrinoProvider,
     store_executor,
 )
-from dbt_hodor.records import Record
+from dbt_hodor.records import CARRY, Record
 from dbt_hodor.store import StateStore, StoreError
 
 PROVIDERS = {
@@ -676,9 +677,23 @@ class Runtime:
         except Exception as exc:  # noqa: BLE001 - a lost record only causes an extra build
             self.warn_once(f"cannot build a state record: {exc}")
             return
-        with self._lock:
-            if facts is not None and facts.kind == "view" and status == "success":
+        if facts is not None and facts.kind == "view" and status == "success":
+            with self._lock:
                 self._view_codes[plan.node_key] = facts.code_hash
+        self._queue(record)
+
+    def _carry(self, plan: Plan) -> None:
+        """After half the lookback window of reuses, copy the last build record forward, so
+        it stays in the window. The copy holds the same facts, so it decides the same."""
+        last, now = plan.last, self.now_ms()
+        if last is None or now - last.recorded_at_ms < self.settings.lookback_days * DAY_MS // 2:
+            return
+        self._queue(
+            dataclasses.replace(last, record_id=str(uuid.uuid4()), recorded_at_ms=now, action=CARRY)
+        )
+
+    def _queue(self, record: Record) -> None:
+        with self._lock:
             self._pending.append(record)
             batch = self._pending if len(self._pending) >= FLUSH_EVERY else None
             if batch is not None:
@@ -799,6 +814,7 @@ class Runtime:
                 for sql in hooks:
                     runner.adapter.execute(sql, auto_begin=False)
             self._record(model, plan, REUSE, RunStatus.Reused.value)
+            self._carry(plan)
             self._count(plan)
             return RunResult.from_node(model, RunStatus.Reused, f"REUSED ({plan.decision.reason})")
         try:
@@ -865,6 +881,7 @@ class Runtime:
                 self._fail_open(test, plan, "replaying", exc)
         if plan.decision.action == REUSE and self.settings.mode == "on" and plan.last:
             self._record(test, plan, REUSE, _value(result.status))
+            self._carry(plan)
             self._count(plan)
             return result
         try:

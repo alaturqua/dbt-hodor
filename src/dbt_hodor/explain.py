@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from dbt_hodor.records import Record
+from dbt_hodor.records import CARRY, Record
 
 _OK_STATUSES = ("success", "pass", "reused")
 
@@ -49,7 +49,10 @@ def report(
                 if last is None
                 else {
                     "invocation_id": last.invocation_id,
-                    "recorded_at_ms": last.recorded_at_ms,
+                    # a carried copy is recorded later than the build it copies
+                    "recorded_at_ms": last.built_at_ms
+                    if last.action == CARRY and last.built_at_ms is not None
+                    else last.recorded_at_ms,
                     "code_hash": last.code_hash,
                     "config_hash": last.config_hash,
                 },
