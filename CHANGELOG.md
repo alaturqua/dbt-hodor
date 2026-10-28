@@ -5,6 +5,17 @@ and the project follows [semantic versioning](https://semver.org).
 
 Until 1.0 the settings and the record schema may change in a minor release.
 
+## [0.3.1] - 2026-10-28
+
+### Bug fixes
+
+- Fewer rebuilds, and two wrong-reuse fixes ([#19](https://github.com/alaturqua/dbt-hodor/issues/19))
+
+### Documentation
+
+- Add adapters card, refresh homepage and drop v1 scope wording ([#18](https://github.com/alaturqua/dbt-hodor/issues/18))
+
+
 ## [0.3.0] - 2026-10-25
 
 ### Bug fixes
