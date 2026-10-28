@@ -44,7 +44,7 @@ Set them as keys on the active `profiles.yml` target. An environment variable ov
 | `hodor_table` | `HODOR_TABLE` | `hodor_state` | table name |
 | `hodor_path` | `HODOR_PATH` | `.hodor/state.duckdb` | DuckDB database file, for `duckdb`. A relative path is relative to the dbt project root. |
 | `hodor_metadata_threads` | `HODOR_METADATA_THREADS` | `8` | 1-64 |
-| `hodor_lookback_days` | `HODOR_LOOKBACK_DAYS` | `90` | 1-3650. A node not built within this window builds once (`no_history`). |
+| `hodor_lookback_days` | `HODOR_LOOKBACK_DAYS` | `90` | 1-3650. A node whose last build record is outside this window builds once (`no_history`). A reused node's build record is carried forward after half the window, so only nodes that did not run for that long age out. |
 
 These apply to the `postgres` store only. Set either `hodor_endpoint` (Lakebase) or `hodor_host`.
 

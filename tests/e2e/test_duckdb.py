@@ -141,7 +141,7 @@ def records(state: Path, invocation: int | None = None) -> list[tuple]:
     with duckdb.connect(str(state), read_only=True) as con:
         return con.execute(
             "select unique_id, mode, decision, reason, action, status from main.hodor_state "
-            "order by recorded_at_ms, unique_id"
+            "where action <> 'carry' order by recorded_at_ms, unique_id"
         ).fetchall()
 
 
@@ -494,6 +494,18 @@ def test_explain_reads_the_state_of_the_project_and_target(project, capsys):
     changed = [u for u in fct["upstreams"] if u["last"] != u["now"]]
     assert [u["table"].split(".")[-1] for u in changed] == ["orders"]
 
+    capsys.readouterr()
+    assert cli.main([*explain, "--summary", "--json"]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert {"decision": "build", "reason": "new_upstream_data", "count": 3} in summary["reasons"]
+    # the source write rebuilt fct_orders, whose build reran its two tests
+    assert [
+        (t["table"].split(".")[-1], t["built_in_run"], t["nodes"]) for t in summary["triggers"]
+    ] == [
+        ("fct_orders", True, 2),
+        ("orders", False, 1),
+    ]
+
     first = fct["last_build"]["invocation_id"]
     assert cli.main([*explain, "--invocation", first, "-s", "fct_orders", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["invocation_id"] == first
@@ -530,3 +542,86 @@ def test_prune_is_a_dry_run_until_yes(project, capsys):
     dbt(root)
     reasons = decisions(state)
     assert reasons and all(reason == "no_history" for _, reason in reasons.values())
+
+
+PYTHON_PARENT = {
+    "models/py_orders.py": """
+        def model(dbt, session):
+            dbt.config(materialized="table")
+            return dbt.source("raw", "orders")
+    """,
+    "models/py_child.sql": "{{ config(materialized='table') }} select count(*) as n from "
+    "{{ ref('py_orders') }}",
+}
+
+
+def test_child_of_an_unsupported_parent_sees_the_parent_build(project):
+    root, warehouse, state = project
+    for name, body in PYTHON_PARENT.items():
+        (root / name).write_text(textwrap.dedent(body).strip() + "\n", encoding="utf-8")
+    dbt(root)
+    dbt(root, "-s", "py_child")  # the child's record catches up with the parent's table
+
+    # the Python parent always builds; its new data must reach the child in the same run
+    with duckdb.connect(str(warehouse)) as con:
+        con.execute("insert into raw.orders values (3, 30)")
+    dbt(root)
+    assert decisions(state)["py_child"] == ("build", "new_upstream_data")
+    with duckdb.connect(str(warehouse)) as con:
+        assert con.execute("select n from main.py_child").fetchone()[0] == 3
+
+
+def test_on_run_start_writes_are_seen(project):
+    root, warehouse, state = project
+    dbt(root)
+    project_file = root / "dbt_project.yml"
+    project_file.write_text(
+        project_file.read_text() + 'on-run-start: "insert into raw.orders values (3, 30)"\n'
+    )
+    dbt(root)
+    assert decisions(state)["fct_orders"] == ("build", "new_upstream_data")
+    with duckdb.connect(str(warehouse)) as con:
+        assert con.execute("select count(*) from main.fct_orders").fetchone()[0] == 3
+
+
+def test_hooks_with_run_values_do_not_rebuild(project):
+    root, _, state = project
+    (root / "models" / "audited.sql").write_text(
+        "{{ config(materialized='table', post_hook=\"insert into main.audit select 1 "
+        "where '{{ invocation_id }}' <> '{{ run_started_at }}'\") }}\n"
+        "select id from {{ ref('stg_orders') }}\n",
+        encoding="utf-8",
+    )
+    dbt(root)
+    dbt(root)
+    assert decisions(state)["audited"] == ("reuse", "no_new_data")
+
+
+def _age_records(state: Path, days: int) -> None:
+    with duckdb.connect(str(state)) as con:
+        con.execute(
+            "update main.hodor_state set recorded_at_ms = recorded_at_ms - ?, "
+            "built_at_ms = built_at_ms - ?",
+            [days * 86_400_000] * 2,
+        )
+
+
+def test_long_reused_nodes_keep_their_build_record(project, capsys):
+    root, _, state = project
+    dbt(root)
+    _age_records(state, 60)  # older than half of hodor_lookback_days (90)
+    assert dbt(root)["fct_orders"][0] == "reused"
+    _age_records(state, 60)  # the first build is now outside the window
+    assert dbt(root)["fct_orders"] == ("reused", "REUSED (no_new_data)")
+    now = decisions(state)
+    assert now["dim_country"] == ("reuse", "no_new_data")
+    tests = [k for k in now if k.startswith("test.")]
+    assert tests and all(now[t] == ("reuse", "no_new_data") for t in tests)  # tests carry too
+
+    # explain lists what the run did, not the carried copies
+    explain = ["explain", "--project-dir", str(root), "--profiles-dir", str(root)]
+    capsys.readouterr()
+    assert cli.main([*explain, "-s", "fct_orders", "--json"]) == 0
+    (fct,) = json.loads(capsys.readouterr().out)["nodes"]
+    assert (fct["action"], fct["reason"]) == ("reuse", "no_new_data")
+    assert fct["last_build"] is not None

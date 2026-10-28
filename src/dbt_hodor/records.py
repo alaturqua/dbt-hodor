@@ -42,6 +42,8 @@ TYPE_NAMES = {
     "trino": {"text": "varchar", "bigint": "bigint"},
 }
 SUCCESS_STATUSES = ("success", "pass", "warn", "fail")
+# action of a copy of the last build, written when a long-reused node nears the lookback limit
+CARRY = "carry"
 _JSON_FIELDS = ("sql_facts", "upstreams", "test_result")
 _MS_FIELDS = ("recorded_at_ms", "data_changed_at_ms", "built_at_ms")
 
@@ -111,7 +113,8 @@ def create_table_sql(table: str, dialect: str) -> str:
 def latest_builds_sql(
     table: str, project: str, target: str, since: str, before: str | None = None
 ) -> str:
-    """Latest successful build per node_key. ROW_NUMBER, not QUALIFY: Postgres has none.
+    """Latest successful build (or carried copy of one) per node_key. ROW_NUMBER, not
+    QUALIFY: Postgres has none.
 
     project, target, since and before are placeholders or literals the store has already made
     safe.
@@ -123,7 +126,8 @@ def latest_builds_sql(
         f"SELECT {cols} FROM (SELECT {cols}, ROW_NUMBER() OVER ("
         "PARTITION BY node_key ORDER BY recorded_at_ms DESC, record_id DESC) AS hodor_rn "
         f"FROM {table} WHERE project_name = {project} AND target_name = {target} "
-        f"AND recorded_at_ms >= {since}{until} AND action = 'build' AND status IN ({statuses})"
+        f"AND recorded_at_ms >= {since}{until} AND action IN ('build', '{CARRY}') "
+        f"AND status IN ({statuses})"
         ") latest WHERE hodor_rn = 1"
     )
 
@@ -145,7 +149,7 @@ def invocation_sql(table: str, project: str, target: str, invocation: str | None
 
     project, target and invocation are placeholders or literals the store has already made safe.
     """
-    where = f"project_name = {project} AND target_name = {target}"
+    where = f"project_name = {project} AND target_name = {target} AND action <> '{CARRY}'"
     if invocation is None:
         invocation = (
             f"(SELECT invocation_id FROM {table} WHERE {where} "

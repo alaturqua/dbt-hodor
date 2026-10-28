@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from dbt_hodor.records import Record
+from dbt_hodor.records import CARRY, Record
 
 _OK_STATUSES = ("success", "pass", "reused")
 
@@ -49,7 +49,10 @@ def report(
                 if last is None
                 else {
                     "invocation_id": last.invocation_id,
-                    "recorded_at_ms": last.recorded_at_ms,
+                    # a carried copy is recorded later than the build it copies
+                    "recorded_at_ms": last.built_at_ms
+                    if last.action == CARRY and last.built_at_ms is not None
+                    else last.recorded_at_ms,
                     "code_hash": last.code_hash,
                     "config_hash": last.config_hash,
                 },
@@ -67,6 +70,67 @@ def report(
         "started_at_ms": first.recorded_at_ms,
         "nodes": nodes,
     }
+
+
+# Reasons whose build came from upstream changes; their changed upstreams are the triggers.
+_UPSTREAM_REASONS = ("new_upstream_data", "upstream_code_changed", "volatile_sql")
+_TOP_TRIGGERS = 10
+
+
+def summarize(rep: Mapping[str, Any]) -> dict[str, Any]:
+    """Counts per decision and reason, and which changed upstreams caused the builds.
+
+    Counted by decision, not action, so a shadow run shows what `on` would have done. An
+    upstream that was itself built in the run marks a rebuild that spread down the DAG.
+    """
+    nodes = rep["nodes"]
+    decisions: dict[str, int] = {}
+    reasons: dict[tuple[str, str], int] = {}
+    for n in nodes:
+        decisions[n["decision"]] = decisions.get(n["decision"], 0) + 1
+        key = (n["decision"], n["reason"])
+        reasons[key] = reasons.get(key, 0) + 1
+    built = {n["node_key"] for n in nodes if n["decision"] == "build"}
+    triggers: dict[str, int] = {}
+    for n in nodes:
+        if n["decision"] != "build" or n["reason"] not in _UPSTREAM_REASONS:
+            continue
+        for u in n["upstreams"]:
+            if u["last"] != u["now"]:
+                triggers[u["table"]] = triggers.get(u["table"], 0) + 1
+    return {
+        **{k: rep[k] for k in ("project", "target", "invocation_id", "started_at_ms")},
+        "nodes": len(nodes),
+        "decisions": dict(sorted(decisions.items())),
+        "reasons": [
+            {"decision": d, "reason": r, "count": c}
+            for (d, r), c in sorted(reasons.items(), key=lambda kv: (kv[0][0], -kv[1], kv[0][1]))
+        ],
+        "triggers": [
+            {"table": t, "built_in_run": t in built, "nodes": c}
+            for t, c in sorted(triggers.items(), key=lambda kv: (-kv[1], kv[0]))
+        ],
+    }
+
+
+def render_summary(summary: Mapping[str, Any]) -> str:
+    counts = ", ".join(f"{c} {d}" for d, c in summary["decisions"].items())
+    lines = [
+        f"dbt-hodor explain: {summary['project']}/{summary['target']}, invocation "
+        f"{summary['invocation_id']} ({_when(summary['started_at_ms'])}), "
+        f"{summary['nodes']} node{'' if summary['nodes'] == 1 else 's'}: {counts}"
+    ]
+    width = max((len(r["reason"]) for r in summary["reasons"]), default=0)
+    lines += [
+        f"  {r['decision']:<5}  {r['reason']:<{width}}  {r['count']}" for r in summary["reasons"]
+    ]
+    triggers = summary["triggers"][:_TOP_TRIGGERS]
+    if triggers:
+        lines.append("changed upstreams behind the builds:")
+        for t in triggers:
+            name = t["table"] + (" (built this run)" if t["built_in_run"] else "")
+            lines.append(f"  {name:<26}  {t['nodes']} node{'' if t['nodes'] == 1 else 's'}")
+    return "\n".join(lines)
 
 
 def _when(ms: int) -> str:

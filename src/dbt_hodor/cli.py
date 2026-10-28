@@ -85,7 +85,7 @@ def _open_store(
 
 
 def _explain(args: argparse.Namespace) -> str:
-    from dbt_hodor.explain import render, report
+    from dbt_hodor.explain import render, render_summary, report, summarize
     from dbt_hodor.runtime import DAY_MS
     from dbt_hodor.store import StoreError
 
@@ -109,6 +109,9 @@ def _explain(args: argparse.Namespace) -> str:
             f"dbt-hodor explain: no records for {', '.join(args.select)} in invocation "
             f"{rep['invocation_id']}; pass --invocation for an earlier run"
         )
+    if args.summary:
+        summary = summarize(rep)
+        return json.dumps(summary, indent=2) if args.json else render_summary(summary)
     return json.dumps(rep, indent=2) if args.json else render(rep)
 
 
@@ -169,6 +172,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     explain.add_argument("--invocation", metavar="ID", help="invocation_id (default: the latest)")
     explain.add_argument("--json", action="store_true", help="print JSON")
+    explain.add_argument(
+        "--summary",
+        action="store_true",
+        help="counts per reason and the changed upstreams behind the builds",
+    )
     explain.add_argument("--project-dir")
     explain.add_argument("--profiles-dir")
     explain.add_argument("--profile")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import threading
@@ -37,6 +38,7 @@ from dbt_hodor.hashing import (
     analyze_node_sql,
     analyze_sql,
     config_hash,
+    normalize_runtime_values,
     unrendered_hash,
 )
 from dbt_hodor.lineage import GraphNode, Lineage, external_inputs, normalize_relation
@@ -50,7 +52,7 @@ from dbt_hodor.providers import (
     TrinoProvider,
     store_executor,
 )
-from dbt_hodor.records import Record
+from dbt_hodor.records import CARRY, Record
 from dbt_hodor.store import StateStore, StoreError
 
 PROVIDERS = {
@@ -459,8 +461,14 @@ class Runtime:
             columns,
             constraints,
             self._execution_macros(node),
-            [analyze_sql(sql, self.dialect, self.relations).code_hash for sql in hooks],
+            [self._hook_hash(sql) for sql in hooks],
         )
+
+    def _hook_hash(self, sql: str) -> str:
+        """A hook's code hash without the values that change every run, such as an audit
+        insert of {{ invocation_id }}. On reuse the hooks do not run by default."""
+        sql = normalize_runtime_values(sql, self.invocation_id, self.run_started_at)
+        return analyze_sql(sql, self.dialect, self.relations).code_hash
 
     def _volatile_groups(
         self, cfg: NodeStateConfig, analysis: SqlAnalysis
@@ -669,9 +677,23 @@ class Runtime:
         except Exception as exc:  # noqa: BLE001 - a lost record only causes an extra build
             self.warn_once(f"cannot build a state record: {exc}")
             return
-        with self._lock:
-            if facts is not None and facts.kind == "view" and status == "success":
+        if facts is not None and facts.kind == "view" and status == "success":
+            with self._lock:
                 self._view_codes[plan.node_key] = facts.code_hash
+        self._queue(record)
+
+    def _carry(self, plan: Plan) -> None:
+        """After half the lookback window of reuses, copy the last build record forward, so
+        it stays in the window. The copy holds the same facts, so it decides the same."""
+        last, now = plan.last, self.now_ms()
+        if last is None or now - last.recorded_at_ms < self.settings.lookback_days * DAY_MS // 2:
+            return
+        self._queue(
+            dataclasses.replace(last, record_id=str(uuid.uuid4()), recorded_at_ms=now, action=CARRY)
+        )
+
+    def _queue(self, record: Record) -> None:
+        with self._lock:
             self._pending.append(record)
             batch = self._pending if len(self._pending) >= FLUSH_EVERY else None
             if batch is not None:
@@ -756,6 +778,21 @@ class Runtime:
         rendered = (get_rendered(hook.get("sql") or "", context, model).strip() for hook in hooks)
         return [sql for sql in rendered if sql]
 
+    def _refresh(self, model: Any) -> DataVersion:
+        """Re-read the version after any build, also one hodor did not decide (Python,
+        microbatch, hodor_error): children in this run must not compare a cached version
+        from before the build."""
+        try:
+            node = self.graph.get(model.unique_id)
+            if node is None or not node.relation or node.materialized == "ephemeral":
+                return UNKNOWN
+            if (node.materialized or "view") == "view":
+                return self.provider.refresh(VIEW_PREFIX + node.relation)
+            return self.provider.refresh(node.relation)
+        except Exception as exc:  # noqa: BLE001 - the build succeeded; never fail the run here
+            self.warn_once(f"cannot read the data version of {model.unique_id}: {exc}")
+            return UNKNOWN
+
     def execute_model(self, runner: Any, model: Any, manifest: Any, original: Callable) -> Any:
         resource_type = _value(model.resource_type)
         if (
@@ -764,7 +801,9 @@ class Runtime:
             # `dbt seed --show` prints each result's agate table, which a reuse does not load
             or (resource_type == "seed" and getattr(get_flags(), "SHOW", False))
         ):
-            return original(runner, model, manifest)
+            result = original(runner, model, manifest)
+            self._refresh(model)
+            return result
         relation = _relation(model)
         hooks: list[str] = []  # rendered while deciding, run on reuse
         plan = self._plan(
@@ -779,6 +818,7 @@ class Runtime:
                 for sql in hooks:
                     runner.adapter.execute(sql, auto_begin=False)
             self._record(model, plan, REUSE, RunStatus.Reused.value)
+            self._carry(plan)
             self._count(plan)
             return RunResult.from_node(model, RunStatus.Reused, f"REUSED ({plan.decision.reason})")
         try:
@@ -787,11 +827,7 @@ class Runtime:
             self._record(model, plan, BUILD, "error", built_at_ms=plan.started_ms)
             raise
         self._count(plan)
-        version = UNKNOWN
-        if plan.facts is not None and plan.facts.kind in OWN_DATA_KINDS and relation:
-            version = self.provider.refresh(relation)
-        elif plan.facts is not None and plan.facts.kind == "view" and relation:
-            version = self.provider.refresh(VIEW_PREFIX + relation)
+        version = self._refresh(model)
         self._record(
             model,
             plan,
@@ -849,6 +885,7 @@ class Runtime:
                 self._fail_open(test, plan, "replaying", exc)
         if plan.decision.action == REUSE and self.settings.mode == "on" and plan.last:
             self._record(test, plan, REUSE, _value(result.status))
+            self._carry(plan)
             self._count(plan)
             return result
         try:
@@ -932,8 +969,26 @@ def start_runtime(task: Any, selected_uids: Any) -> None:
             warn(f"dbt-hodor: cannot read the --state manifest: {exc}")
     with adapter.connection_named("hodor"):
         runtime = get_runtime(task.config, adapter, task.manifest, state_manifest)
-    if runtime is not None:
-        runtime.prefetch(selected_uids)
+    if runtime is None:
+        return
+    if _has_start_hooks(task):
+        # on-run-start runs after this and may write to the tables a prefetch would read;
+        # each node reads its versions when it runs instead
+        debug("dbt-hodor: on-run-start hooks, data versions are read per node")
+        return
+    runtime.prefetch(selected_uids)
+
+
+def _has_start_hooks(task: Any) -> bool:
+    get_hooks = getattr(task, "get_hooks_by_type", None)
+    if get_hooks is None:  # only RunTask and its subclasses run on-run-start
+        return False
+    try:
+        from dbt.node_types import RunHookType
+
+        return bool(get_hooks(RunHookType.Start))
+    except Exception:  # noqa: BLE001 - unknown: no prefetch, which is slower, never stale
+        return True
 
 
 def current_runtime() -> Runtime | None:

@@ -39,6 +39,19 @@ def test_duckdb_load_returns_latest_successful_build_per_node(store, record):
     assert loaded["c.s.dim"].record_id == "g"
 
 
+def test_duckdb_carried_copy_counts_as_the_build_but_not_as_an_invocation(store, record):
+    store.append(
+        [
+            record(record_id="a", invocation_id="i1", recorded_at_ms=100, built_at_ms=100),
+            record(record_id="b", invocation_id="i2", recorded_at_ms=900, action="reuse"),
+            record(record_id="c", invocation_id="i1", recorded_at_ms=900, action="carry"),
+        ]
+    )
+    assert store.load("proj", "prod", since_ms=500)["c.s.fct"].record_id == "c"
+    assert [r.record_id for r in store.invocation("proj", "prod", None)] == ["b"]
+    assert [r.record_id for r in store.invocation("proj", "prod", "i1")] == ["a"]
+
+
 def test_duckdb_prune_counts_without_deleting_then_deletes(store, record):
     store.append(
         [

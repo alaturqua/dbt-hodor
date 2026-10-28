@@ -58,7 +58,7 @@ The default store is [`delta`](../stores/delta.md). The other stores are [`duckd
 
 ## Data version
 
-hodor runs `DESCRIBE HISTORY <table> LIMIT 20` and reads `version`, `timestamp`, `operation` and `operationMetrics` of each commit. It runs one query per relevant table, in parallel on `hodor_metadata_threads` threads, and caches the result for the run. After hodor builds a table, it reads that table's history once more, so downstream nodes in the same run see the new version.
+hodor runs `DESCRIBE HISTORY <table> LIMIT 20` and reads `version`, `timestamp`, `operation` and `operationMetrics` of each commit. It runs one query per relevant table, in parallel on `hodor_metadata_threads` threads, and caches the result for the run. After hodor builds a table, it reads that table's history once more, so downstream nodes in the same run see the new version. If those 20 commits are all maintenance commits (see below), for example after many `OPTIMIZE`, `VACUUM` or tag commits by predictive optimization, hodor reads up to 1000 commits once more for that table.
 
 ### What counts as a data change
 
@@ -68,7 +68,7 @@ Known maintenance and metadata operations never count:
 
 Every other operation counts as a data change, unless its change metrics are all zero. The change metrics are `numOutputRows`, `numRemovedFiles`, `numTargetRowsInserted`, `numTargetRowsUpdated`, `numTargetRowsDeleted`, `numDeletedRows`, `numUpdatedRows` and `numCopiedRows`. A commit without any of them counts as a change. `numRemovedFiles` is there because a `CREATE OR REPLACE TABLE` or `INSERT OVERWRITE` that writes 0 rows shows `numOutputRows` at 0 but still empties the table.
 
-The token is the version and the commit time of the latest data-change commit, for example `7@1792465200000`. The commit time matters: a table that is dropped and recreated, or swapped in from a staging table (`use_safer_relation_operations` with `use_materialization_v2`), restarts its versions, so the version alone can repeat after a real change. If the 20-commit window holds no data-change commit, the version is unknown, and dependents build.
+The token is the version and the commit time of the latest data-change commit, for example `7@1792465200000`. The commit time matters: a table that is dropped and recreated, or swapped in from a staging table (`use_safer_relation_operations` with `use_materialization_v2`), restarts its versions, so the version alone can repeat after a real change. If the history holds no data-change commit within the latest 1000 commits, or within Delta's history retention, the version is unknown, and dependents build.
 
 Unknown operations count as changes on purpose. A new Delta operation name can cause extra builds, never wrong reuses.
 

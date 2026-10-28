@@ -15,7 +15,7 @@ Portable types only: text and bigint, with JSON stored as text. Times are epoch 
 | `mode` | text | `shadow` or `on` |
 | `decision` | text | what the engine decided: `build` or `reuse` |
 | `reason` | text | [reason code](../how-it-works/decision-rules.md) |
-| `action` | text | what actually happened: `build` or `reuse`. In shadow mode always `build` |
+| `action` | text | what actually happened: `build` or `reuse`. In shadow mode always `build`. `carry` marks a copy of the last build record (see below) |
 | `status` | text | dbt status: success, error, pass, warn, fail (or `reused`) |
 | `text_hash`, `code_hash`, `unrendered_hash`, `config_hash`, `hash_version` | text | [hashing](../how-it-works/hashing.md) |
 | `sql_facts` | text (JSON) | stored SQL analysis for the fast path |
@@ -27,6 +27,8 @@ Portable types only: text and bigint, with JSON stored as text. Times are epoch 
 | `hodor_version` | text | package version |
 
 At run start hodor loads the latest successful `build` record per `node_key`, for the project and target, within `hodor_lookback_days`. Successful means status `success`, `pass`, `warn` or `fail`. Shadow-mode builds count, so shadow mode builds the history that `on` mode needs.
+
+When hodor reuses a node whose last build record is older than half of `hodor_lookback_days`, it appends a copy of that record with the current `recorded_at_ms` and action `carry`. The copy keeps every other field, including the original `invocation_id` and `built_at_ms`, so the next decision is the same as with the original record. A node that is reused for months therefore keeps its build record in the window. `dbt-hodor explain` does not list carried copies as part of an invocation.
 
 ## Retention
 

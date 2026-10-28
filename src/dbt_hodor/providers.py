@@ -19,6 +19,8 @@ from dbt_hodor.metadata import (
 )
 
 HISTORY_LIMIT = 20
+# Read when the first window holds only maintenance commits (OPTIMIZE, VACUUM, tags).
+DEEP_HISTORY_LIMIT = 1000
 # A view stores no data: its version is a hash of its definition in the warehouse.
 VIEW_PREFIX = "view:"
 
@@ -170,10 +172,15 @@ class DeltaProvider(Provider):
     )
 
     def _history(self, target: str) -> DataVersion:
-        names, rows = fetch(self._adapter, f"DESCRIBE HISTORY {target} LIMIT {HISTORY_LIMIT}")
-        return delta_data_version(
-            history_entry_from_row(dict(zip(names, row, strict=True))) for row in rows
-        )
+        version = UNKNOWN
+        for limit in (HISTORY_LIMIT, DEEP_HISTORY_LIMIT):
+            names, rows = fetch(self._adapter, f"DESCRIBE HISTORY {target} LIMIT {limit}")
+            version = delta_data_version(
+                history_entry_from_row(dict(zip(names, row, strict=True))) for row in rows
+            )
+            if version.known or len(rows) < limit:  # found, or the whole history was read
+                break
+        return version
 
     def _query(self, key: str) -> DataVersion:
         if key.startswith(VIEW_PREFIX):

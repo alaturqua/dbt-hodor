@@ -31,6 +31,7 @@ Set the mode with `hodor_mode` in `profiles.yml`, with `HODOR_MODE`, or for one 
 dbt-hodor explain                          # every node of the latest run
 dbt-hodor explain -s fct_orders -s dim_country
 dbt-hodor explain --invocation <invocation_id> --json
+dbt-hodor explain --summary                # counts per reason for the latest run
 ```
 
 | Option | Meaning |
@@ -38,6 +39,7 @@ dbt-hodor explain --invocation <invocation_id> --json
 | `-s`, `--select` | A unique_id, a relation or a node name. A name matches every version of a model. Repeat it for more nodes. |
 | `--invocation` | The dbt `invocation_id` of the run. Default: the latest run of the project and target. |
 | `--json` | Print the same data as JSON, for scripts and CI. |
+| `--summary` | Print counts per decision and reason instead of one block per node, and the changed upstreams behind builds with `new_upstream_data`, `upstream_code_changed` or `volatile_sql`, with how many nodes each one rebuilt. An upstream marked `(built this run)` was itself built in the run, so its rebuild spread to those nodes. Counts use the decision, so in shadow mode they show what `on` would have done. With `--json`, the summary is printed as JSON. |
 | `--project-dir`, `--profiles-dir`, `--profile`, `-t`/`--target` | As in dbt. Unset options use dbt's defaults and `DBT_PROJECT_DIR`, `DBT_PROFILES_DIR` and `DBT_TARGET`. |
 
 hodor finds the store the way a dbt run does: it reads `profiles.yml` and `dbt_project.yml`, and `HODOR_*` env vars override the profile keys. The `delta` store is read through dbt's own Databricks connection, so the same credentials apply. `--vars` is not read.
