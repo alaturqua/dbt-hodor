@@ -4,6 +4,22 @@ What changes for a running project from one release to the next. Each release li
 
 Until 1.0, the settings and the record schema may change in a minor release.
 
+## 0.3.1
+
+### Behavior changes
+
+- **Two cases that reused a node now build.** A child of a node that hodor does not decide (a Python model, a microbatch model, or a node where hodor hit an error) was compared with the data version from before its parent ran, so it could be reused after the parent wrote new rows. hodor now reads the data version again after every build. A table written by an `on-run-start` hook kept the version read before the hook ran, so its children could be reused too. When a run has `on-run-start` hooks, hodor now reads each version when a node needs it instead of all at the start, so such runs start slower. See [Run flow](how-it-works/run-flow.md).
+- **Records have a new action, `carry`.** When a node is reused and its last build is older than half of `lookback_days`, hodor writes a copy of that build record with the action `carry`. The node keeps its history and does not build with `no_history` once the first build leaves the window. A query on the state table that counts builds should filter on `action = 'build'`. See [Records](stores/records.md).
+
+### Fewer rebuilds
+
+- Hooks that use `{{ invocation_id }}` or `run_started_at` no longer change the config hash on every run. Hooks without those values hash as before, so the upgrade itself does not rebuild nodes.
+- On Databricks, when the last 20 commits of a Delta table hold no data change, hodor reads up to 1000 commits before the data version counts as unknown. See [Databricks](adapters/databricks.md).
+
+### New
+
+- **`dbt-hodor explain --summary`** counts the nodes of a run per decision and reason, and lists the changed upstreams behind the builds. See [Operations](operations.md).
+
 ## 0.3.0
 
 ### Behavior changes
