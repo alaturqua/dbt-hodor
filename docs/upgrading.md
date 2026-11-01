@@ -4,19 +4,19 @@ What changes for a running project from one release to the next. Each release li
 
 Until 1.0, the settings and the record schema may change in a minor release.
 
-## Unreleased
-
-### New
-
-- **dbt v2.** `dbt-hodor serve` is a local state server that dbt 2.0.8 asks whether to run each node. Install it with the `v2` extra. See [dbt v2](dbt-v2.md).
-- **State selection, defer and clone on dbt-core.** With `defer_to_target` set, hodor answers `state:` selectors and `--defer` without `--state` from the base target's records, and clones unchanged tables and incremental models from the base target. `allow_clones` and `pre_clone` are read. All three were accepted and ignored before. A `state:` selector that cannot be compared with the base target fails the run. See [Decision rules](how-it-works/decision-rules.md#state-selection).
-- **New reason codes.** `cloned_from_base` and `pre_cloned_from_base` (clones), `same_second_read` and `store_slow` (dbt v2). On dbt v2 the server also answers a clone dbt asks for itself with `clone_registered`, or declines it with `clones_off`.
+## 0.4.0
 
 ### Behavior changes
 
 - **A project that already sets `defer_to_target`, `allow_clones` or `pre_clone` changes behaviour.** Nodes can now be cloned, and `state:` selectors without `--state` use hodor's records. Set `allow_clones: false` to keep clones off. On dbt v2 `allow_clones` is not read: `dbt-hodor serve` clones only with `--allow-clones` or `HODOR_ALLOW_CLONES=true`.
 
 - **Records have a new column, `node_hashes`.** It holds the hashes of a node and its relation name as written, as JSON text. hodor adds the column when it first opens a table that lacks it, with `ALTER TABLE ... ADD COLUMN`, so the principal that runs hodor needs ALTER on the state table once. If it has no such grant, add the column yourself (`dbt-hodor ddl` prints the current table definition); until then hodor is off for the run with a warning. `dbt-hodor explain` and `prune` without `--yes` never alter the table, and read an old table without the column. Existing records keep a `NULL` value.
+
+### New
+
+- **dbt v2.** `dbt-hodor serve` is a local state server that dbt 2.0.8 asks whether to run each node. Install it with the `v2` extra. See [dbt v2](dbt-v2.md).
+- **State selection, defer and clone on dbt-core.** With `defer_to_target` set, hodor answers `state:` selectors and `--defer` without `--state` from the base target's records, and clones unchanged tables and incremental models from the base target. `allow_clones` and `pre_clone` are read. All three were accepted and ignored before. A `state:` selector that cannot be compared with the base target fails the run. See [Decision rules](how-it-works/decision-rules.md#state-selection).
+- **New reason codes.** `cloned_from_base` and `pre_cloned_from_base` (clones), `same_second_read` and `store_slow` (dbt v2). On dbt v2 the server also answers a clone dbt asks for itself with `clone_registered`, or declines it with `clones_off`.
 
 ## 0.3.1
 
