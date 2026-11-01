@@ -5,6 +5,17 @@ and the project follows [semantic versioning](https://semver.org).
 
 Until 1.0 the settings and the record schema may change in a minor release.
 
+## [0.4.0] - 2026-11-01
+
+### Dependencies
+
+- Bump the python group across 1 directory with 4 updates ([#22](https://github.com/alaturqua/dbt-hodor/issues/22))
+
+### Features
+
+- Support dbt v2 and add state selection, defer and clone ([#23](https://github.com/alaturqua/dbt-hodor/issues/23))
+
+
 ## [0.3.1] - 2026-10-28
 
 ### Bug fixes
