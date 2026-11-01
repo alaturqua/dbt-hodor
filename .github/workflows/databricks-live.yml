@@ -1,0 +1,94 @@
+name: Databricks live tests
+
+# The live Databricks tests (`pytest -m databricks`) against a real workspace. Started by hand
+# only, and every run waits for approval in the `databricks` environment, which holds the
+# service principal's OAuth secret and the connection settings. The environment only admits
+# runs from main.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: databricks-live
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: databricks
+    env:
+      HODOR_DBX_HOST: ${{ secrets.HODOR_DBX_HOST }}
+      HODOR_DBX_HTTP_PATH: ${{ secrets.HODOR_DBX_HTTP_PATH }}
+      HODOR_DBX_CATALOG: ${{ secrets.HODOR_DBX_CATALOG }}
+      HODOR_DBX_CI_CATALOG: ${{ secrets.HODOR_DBX_CI_CATALOG }}
+      # One schema per run: the tests create it and the ones derived from it, and drop them.
+      HODOR_DBX_SCHEMA: hodor_ci_${{ github.run_id }}_${{ github.run_attempt }}
+    steps:
+      # Logs of a public repo are public, and secrets are masked only as whole strings. Mask
+      # the parts of them that logs print on their own before anything runs.
+      - name: Settings are present, and masked
+        # The live tests skip themselves when one is empty, and a run that skips is green.
+        run: |
+          for name in HODOR_DBX_HOST HODOR_DBX_HTTP_PATH HODOR_DBX_CATALOG \
+                      HODOR_DBX_CI_CATALOG HODOR_DBX_SCHEMA; do
+            if [ -z "${!name}" ]; then echo "$name is empty" >&2; exit 1; fi
+          done
+          echo "::add-mask::${HODOR_DBX_HTTP_PATH##*/}"  # warehouse id
+          echo "::add-mask::${HODOR_DBX_HOST%%.*}"  # workspace name, without the domain
+      # Pinned to commits: this job holds secrets, and a moved tag would run with them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          enable-cache: false  # no cache shared with other workflows in a job with secrets
+      - run: uv sync --group dev
+      - name: OAuth token for the service principal
+        # Client credentials (OAuth M2M). The token lasts about an hour, enough for one run.
+        env:
+          CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        run: |
+          token=$(curl -sSf -u "$CLIENT_ID:$CLIENT_SECRET" \
+            -d grant_type=client_credentials -d scope=all-apis \
+            "https://$HODOR_DBX_HOST/oidc/v1/token" | jq -r .access_token)
+          if [ -z "$token" ] || [ "$token" = null ]; then echo "no token" >&2; exit 1; fi
+          echo "::add-mask::$token"
+          echo "HODOR_DBX_TOKEN=$token" >> "$GITHUB_ENV"
+          # The workspace id and the service principal's id and name show up in URLs and
+          # permission errors; mask them too.
+          me=$(curl -sSf -D "$RUNNER_TEMP/headers" -H "Authorization: Bearer $token" \
+            "https://$HODOR_DBX_HOST/api/2.0/preview/scim/v2/Me")
+          org=$(tr -d '\r' < "$RUNNER_TEMP/headers" | awk -F': ' 'tolower($1)=="x-databricks-org-id"{print $2}')
+          rm -f "$RUNNER_TEMP/headers"
+          for v in "$org" "$(jq -r .id <<< "$me")" "$(jq -r .displayName <<< "$me")"; do
+            if [ -n "$v" ] && [ "$v" != null ]; then echo "::add-mask::$v"; fi
+          done
+      - name: Live Databricks tests
+        run: uv run pytest -q -m databricks tests/integration
+      - name: Drop the run's schemas
+        # The tests drop their schemas, but a cancelled or failed run may not get that far.
+        if: always() && env.HODOR_DBX_TOKEN != ''
+        run: |
+          uv run python - <<'EOF'
+          import os
+          from databricks import sql
+
+          s = os.environ["HODOR_DBX_SCHEMA"]
+          main, ci = os.environ["HODOR_DBX_CATALOG"], os.environ["HODOR_DBX_CI_CATALOG"]
+          names = [(main, s), (main, f"{s}_clone"), (main, f"{s}_clone_dev"),
+                   (main, f"{s}_slim_ci"), (ci, f"pr_7_{s}_slim_ci")]
+          with sql.connect(
+              server_hostname=os.environ["HODOR_DBX_HOST"],
+              http_path=os.environ["HODOR_DBX_HTTP_PATH"],
+              access_token=os.environ["HODOR_DBX_TOKEN"],
+          ) as conn, conn.cursor() as cur:
+              for catalog, schema in names:
+                  cur.execute(f"DROP SCHEMA IF EXISTS `{catalog}`.`{schema}` CASCADE")
+          EOF
