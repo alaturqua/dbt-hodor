@@ -67,7 +67,7 @@ select = ["E", "F", "I", "B", "UP"]
 dev = [
     "dbt-databricks==1.12.7",
     "dbt-duckdb>=1.11.0",
-    "dbt-trino==1.10.6",
+    "dbt-trino==1.11.0",
     "dbt-snowflake==1.12.4",
     "duckdb>=1.0",
     "git-cliff>=2.6",
