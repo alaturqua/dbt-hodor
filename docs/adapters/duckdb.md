@@ -45,3 +45,4 @@ DuckDB has no table history. The token is the row count plus an order-independen
 ## Limits
 
 - The fingerprint is one query per table, which is fine for local test data sizes.
+- No clones from the base target: dbt-duckdb does not report `can_clone_table`, so a node builds as decided. The end-to-end tests clone through project macros that override it. See [Cloning](../how-it-works/decision-rules.md#cloning-from-the-base-target).

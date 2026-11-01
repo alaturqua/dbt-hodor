@@ -12,7 +12,7 @@ Parents come from `depends_on.nodes`. dbt also adds the `to` model or source of 
 
 ## Sources
 
-A source gives its Delta data version. A source that is not a Delta table (a foreign table, a view) is unknown.
+A source gives its adapter's data version; see [Adapters](../adapters/index.md). A source whose version the adapter cannot read is unknown.
 
 ## Deferred parents
 

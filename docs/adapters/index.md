@@ -9,4 +9,6 @@ hodor supports the `databricks`, `trino`, `snowflake` and `duckdb` adapters and 
 | [Snowflake](snowflake.md) | `dbt-snowflake` 1.12.4 | `SYSTEM$LAST_CHANGE_COMMIT_TIME` plus the `created` and `last_ddl` times | `delta`, which turns hodor off | `duckdb`, `postgres` | live test passed on Snowflake 10.38 |
 | [DuckDB](duckdb.md) | `dbt-duckdb` | content fingerprint | `delta`, which turns hodor off | `duckdb`, `postgres` | unit and end-to-end tests |
 
+The dbt-core run supports the adapters in the table. dbt v2 is served by `dbt-hodor serve` for the `databricks`, `spark`, `snowflake`, `bigquery` and `redshift` dialects; see [dbt v2](../dbt-v2.md).
+
 A store and adapter pairing outside this table turns hodor off for the run with a warning. For example, `delta` needs the `databricks` adapter and `trino` needs the `trino` adapter. See [State stores](../stores/index.md).

@@ -23,9 +23,11 @@ dbt-hodor is a free, self-hosted alternative to dbt Labs' [dbt State](https://do
 
 It needs no dbt platform account and sends nothing to external services. It supports the `databricks`, `trino`, `snowflake` and `duckdb` adapters: see [Adapters](adapters/index.md). State lives in a Delta table on Databricks, in a Trino table, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 
+hodor works with dbt-core and with dbt v2; see [dbt-core and dbt v2](dbt-core-vs-dbt-v2.md).
+
 !!! warning "Status: early development"
 
-    hodor has end-to-end tests on dbt-duckdb and live tests on a Databricks SQL warehouse and on Databricks Lakebase; [the test docs](development.md#tests) list what they cover. It has not run in a large production project yet. Before enabling reuse in production, run in shadow mode for at least a week of scheduled runs and review its decisions. See [the rollout guidance](operations.md#rollout). Changes between releases, including the breaking ones, are in [Upgrading](upgrading.md).
+    hodor has end-to-end tests on dbt-duckdb. Live tests ran on a Databricks SQL warehouse (dbt-core, including a clone, and dbt v2) on Trino with the Iceberg connector and on a Lakebase Postgres store. The live test for Snowflake exists, but did not run for the current version. [The test docs](development.md#tests) list what they cover. It has not run in a large production project yet. Before enabling reuse in production, run in shadow mode for at least a week of scheduled runs and review its decisions. See [the rollout guidance](operations.md#rollout). Changes between releases, including the breaking ones, are in [Upgrading](upgrading.md).
 
 ## Why "hodor"
 
@@ -40,11 +42,11 @@ hodor holds the door in front of your warehouse. A node gets through to a rebuil
 3. **Decides.** It compares both against the record of the node's last build and returns `reuse` or `build`, with a reason code.
 4. **Records.** It appends one record per node to the state table.
 
-Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
+Every failure leads to a build, never to a reuse. hodor does not fail a dbt run, with three exceptions: a `state:` selector that cannot compare fails the run; an incremental node whose partial clone cannot be dropped fails that node; and on dbt-core, `--defer` without `--state` fails the run when hodor cannot supply the base target. See [Decision rules](how-it-works/decision-rules.md#state-selection) and [Defer without --state](how-it-works/decision-rules.md#defer-without-state).
 
 ## Slim CI
 
-A pull request that builds `state:modified+` into a CI catalog or a schema per pull request, under any naming scheme, and reads the rest from a base target with `--defer --state`, works with hodor as it is. The base target is what the pull request is compared with: the main catalog of the same environment, or prod.
+A pull request that builds `state:modified+` into a CI catalog or a schema per pull request, under any naming scheme, and reads the rest from a base target with `--defer --state`, works with hodor as it is. The base target is what the pull request is compared with: the main catalog of the same environment, or another environment.
 
 - Each push to the PR reuses what the last push built, when the code and the data it reads are unchanged.
 - Different catalog and schema names between targets are not code changes.
@@ -107,6 +109,22 @@ The [Slim CI](slim-ci.md) page has the setup. The [interactive guide](guide/inde
 
     [:octicons-arrow-right-24: State stores](stores/index.md)
 
+- :material-server:{ .lg .middle } __dbt v2__
+
+    ---
+
+    `dbt-hodor serve`, the local state server that dbt v2 asks about each node.
+
+    [:octicons-arrow-right-24: dbt v2](dbt-v2.md)
+
+- :material-compare:{ .lg .middle } __dbt-core and dbt v2__
+
+    ---
+
+    What differs between the plugin on dbt-core and the state server on dbt v2.
+
+    [:octicons-arrow-right-24: dbt-core and dbt v2](dbt-core-vs-dbt-v2.md)
+
 - :material-shield-check:{ .lg .middle } __Operations__
 
     ---
@@ -134,8 +152,10 @@ The [Slim CI](slim-ci.md) page has the setup. The [interactive guide](guide/inde
 | `duckdb` store and content fingerprint | built, tested |
 | `dbt-hodor explain` CLI | built, tested end to end on dbt-duckdb; not yet run live on Databricks |
 | `dbt-hodor prune` CLI | built, tested end to end on dbt-duckdb |
-| `postgres` store, Lakebase included | built, tested end to end against Lakebase (`pytest -m postgres`) |
+| `postgres` store, Lakebase included | built, tested end to end against Lakebase (`pytest -m postgres`) for the current version |
 | `trino` store and Trino data versions | built; Iceberg tested live on Trino 476 in Docker, Delta Lake connector unit-tested only |
-| Snowflake adapter | built; tested live on Snowflake 10.38, with state in DuckDB or Postgres |
+| Snowflake adapter | built; tested live on Snowflake 10.38, with state in DuckDB or Postgres; not run for the current version |
 | Slim CI: `--defer`, `--favor-state`, environment-neutral hash | built, tested end to end on dbt-duckdb and live on Databricks |
+| `state:` selection, defer and clone from a base target on dbt-core | built, tested end to end on dbt-duckdb; live on Databricks: shallow clone, `pre_clone` and a base table written since its build |
+| dbt v2 state server (`dbt-hodor serve`) | built, tested with requests recorded from dbt 2.0.8, with unit and server tests, and with live tests of dbt 2.0.8 on a Databricks SQL warehouse |
 | PyPI package | [published](https://pypi.org/project/dbt-hodor/) |

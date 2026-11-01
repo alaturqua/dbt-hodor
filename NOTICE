@@ -12,5 +12,10 @@ Files derived from dbt-state, each modified for dbt-hodor:
   the plugin entry point
 - src/dbt_hodor/patches.py (from clients/dbt_state/src/dbt_state/runner.py)
 
+The Python files under src/dbt_hodor/v2/proto/ are generated from the protocol
+buffer definitions in https://github.com/dbt-labs/dbt (tag v2.0.8), copyright
+dbt Labs, Inc., licensed under the Apache License, Version 2.0. Regenerate them
+with scripts/gen_v2_stubs.py.
+
 dbt is a trademark of dbt Labs, Inc. dbt-hodor is not affiliated with or
 endorsed by dbt Labs, Inc. or Fivetran, Inc.

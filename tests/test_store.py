@@ -4,7 +4,7 @@ from sqlglot import exp
 
 from dbt_hodor.config import NodeStateConfig
 from dbt_hodor.engine import BUILD, NodeFacts, decide
-from dbt_hodor.records import COLUMN_NAMES, Record
+from dbt_hodor.records import COLUMN_NAMES, COLUMNS, TYPE_NAMES, Record
 from dbt_hodor.store import StoreError
 from dbt_hodor.store.delta import DeltaStore, quote_table, sql_literal, trino_literal
 from dbt_hodor.store.trino import TrinoStore
@@ -174,18 +174,21 @@ def test_sql_literal_rejects_other_types():
 
 
 class FakeWarehouse:
-    def __init__(self, rows=(), fail=False, exists=False):
+    def __init__(self, rows=(), fail=False, exists=False, columns=COLUMN_NAMES):
         self.statements = []
         self.rows = rows
         self.fail = fail
         self.exists = exists
+        self.columns = columns
 
     def __call__(self, sql):
         self.statements.append(sql)
         if self.fail:
             raise RuntimeError("warehouse down")
-        if sql.endswith("LIMIT 0") and not self.exists:
-            raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND")
+        if sql.startswith("DESCRIBE"):
+            if not self.exists:
+                raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND")
+            return [(name, "string") for name in self.columns]
         return self.rows if sql.startswith("SELECT") else []
 
 
@@ -198,7 +201,7 @@ def test_store_quotes_the_table_and_wraps_errors(store_class, quote, dialect):
     store_class("iceberg", "ops", "hodor_state", warehouse)
     table = ".".join(f"{quote}{p}{quote}" for p in ("iceberg", "ops", "hodor_state"))
     probe, create = warehouse.statements
-    assert probe == f"SELECT * FROM {table} LIMIT 0"
+    assert probe == f"DESCRIBE {table}"
     assert create.startswith(f"CREATE TABLE IF NOT EXISTS {table}")
     assert ("CLUSTER BY" in create) == (store_class is DeltaStore)
     if store_class is TrinoStore:
@@ -232,7 +235,7 @@ def test_store_inserts_in_batches_that_parse_back(store_class, quote, dialect, r
 def test_store_reads_with_dialect_literals(store_class, quote, dialect, record):
     warehouse = FakeWarehouse(rows=[record().to_row()])
     store = store_class("c", "s", "hodor_state", warehouse, read_only=True)
-    assert warehouse.statements == []  # read-only: no probe, no CREATE
+    assert warehouse.statements == [f"DESCRIBE {store._table}"]  # read-only: no CREATE
     assert store.load("pro'j", "prod", 5) == {"c.s.fct": record()}
     select = warehouse.statements[-1]
     project = store_class._literal("pro'j")
@@ -248,7 +251,7 @@ def test_store_reads_with_dialect_literals(store_class, quote, dialect, record):
 def test_delta_store_invocation_and_before(record):
     warehouse = FakeWarehouse(rows=[record().to_row()])
     store = DeltaStore("c", "s", "hodor_state", warehouse, read_only=True)
-    assert warehouse.statements == []  # read-only: no probe, no CREATE
+    assert warehouse.statements == ["DESCRIBE `c`.`s`.`hodor_state`"]  # read-only: no CREATE
     assert store.invocation("proj", "prod", "inv-1") == [record()]
     assert (
         "AND invocation_id = 'inv-1' ORDER BY recorded_at_ms, record_id" in warehouse.statements[-1]
@@ -270,7 +273,7 @@ def test_delta_store_skips_create_when_the_table_exists():
     # job principals often have MODIFY but no CREATE TABLE on the schema
     warehouse = FakeWarehouse(exists=True)
     DeltaStore("c", "s", "hodor_state", warehouse)
-    assert warehouse.statements == ["SELECT * FROM `c`.`s`.`hodor_state` LIMIT 0"]
+    assert warehouse.statements == ["DESCRIBE `c`.`s`.`hodor_state`"]
 
 
 @pytest.mark.parametrize(
@@ -319,3 +322,187 @@ def test_failed_insert_is_a_store_error_and_leaves_no_history(store_class, recor
     facts = NodeFacts(kind="table", code_hash="h", config_hash="c", hash_version="1")
     decision = decide(facts, last, NodeStateConfig(), 1_000_000)
     assert (decision.action, decision.reason) == (BUILD, "no_history")
+
+
+def test_duckdb_load_latest_includes_reuse_records_for_selection(store, record):
+    # a model's reuse record has status "reused", as dbt-core's RunStatus.Reused
+    build = record(record_id="a", recorded_at_ms=100, node_hashes={"body": "old"})
+    reuse = record(
+        record_id="b",
+        recorded_at_ms=200,
+        action="reuse",
+        status="reused",
+        node_hashes={"body": "new"},
+    )
+    other = record(record_id="c", recorded_at_ms=300, node_key="c.s.x", status="error")
+    store.append([build, reuse, other])
+    latest = store.load_latest("proj", "prod", 0, reused=True)
+    assert latest == {"c.s.fct": reuse}  # the failed record is not a successful one
+    # the build fell out of the lookback window: the reuse alone still counts
+    assert store.load_latest("proj", "prod", 150, reused=True) == {"c.s.fct": reuse}
+    assert store.load_latest("proj", "prod", 201, reused=True) == {}
+    assert store.load_latest("proj", "dev", 0, reused=True) == {}
+    # defer and clone read builds, carries and clones only
+    assert store.load_latest("proj", "prod", 0) == {"c.s.fct": build}
+
+
+def test_load_still_returns_builds_only(store, record):
+    build = record(record_id="a", recorded_at_ms=100)
+    store.append([build, record(record_id="b", recorded_at_ms=200, action="reuse")])
+    assert store.load("proj", "prod", 0) == {"c.s.fct": build}
+
+
+OLD_COLUMNS = [name for name in COLUMN_NAMES if name != "node_hashes"]
+
+
+def _old_table(path, rows=()):
+    """A table as 0.3.1 made it: the current columns without node_hashes."""
+    con = duckdb.connect(str(path))
+    columns = ", ".join(f"{n} {TYPE_NAMES['duckdb'][k]}" for n, k in COLUMNS if n in OLD_COLUMNS)
+    con.execute(f"CREATE TABLE hodor_state ({columns})")
+    marks = ", ".join("?" for _ in OLD_COLUMNS)
+    for row in rows:
+        con.execute(f"INSERT INTO hodor_state VALUES ({marks})", list(row.to_row())[:-1])
+    con.close()
+
+
+def test_open_adds_node_hashes_to_an_old_table(tmp_path, record):
+    path = tmp_path / "old.duckdb"
+    _old_table(path)
+    store = DuckDBStore(str(path))
+    try:
+        original = record(node_hashes={"engine": "v1"})
+        store.append([original])
+        assert store.load("proj", "prod", 0) == {"c.s.fct": original}
+        assert store.load_latest("proj", "prod", 0) == {"c.s.fct": original}
+    finally:
+        store.close()
+    store = DuckDBStore(str(path))  # a second open finds the column and changes nothing
+    store.close()
+
+
+def test_read_only_open_leaves_an_old_table_alone(tmp_path, record):
+    path = tmp_path / "old.duckdb"
+    _old_table(path, [record(action="reuse")])
+    reader = DuckDBStore(str(path), read_only=True)
+    try:
+        assert reader.invocation("proj", "prod", None)[0].node_hashes is None
+        assert reader.load_latest("proj", "prod", 0)["c.s.fct"].node_hashes is None
+        assert reader.load("proj", "prod", 0) == {}  # a reuse record is no build
+    finally:
+        reader.close()
+    con = duckdb.connect(str(path), read_only=True)
+    names = [r[0] for r in con.execute("DESCRIBE hodor_state").fetchall()]
+    con.close()
+    assert "node_hashes" not in names
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_warehouse_store_adds_node_hashes_to_an_old_table(store_class, quote, dialect):
+    warehouse = FakeWarehouse(exists=True, columns=OLD_COLUMNS)
+    store_class("c", "s", "hodor_state", warehouse)
+    table = ".".join(f"{quote}{p}{quote}" for p in ("c", "s", "hodor_state"))
+    assert warehouse.statements[0] == f"DESCRIBE {table}"
+    assert warehouse.statements[1].startswith(f"ALTER TABLE {table} ADD COLUMN node_hashes ")
+    assert len(warehouse.statements) == 2
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_warehouse_store_read_only_does_not_alter_an_old_table(store_class, quote, dialect, record):
+    warehouse = FakeWarehouse(rows=[record().to_row()], exists=True, columns=OLD_COLUMNS)
+    store = store_class("c", "s", "hodor_state", warehouse, read_only=True)
+    store.load("proj", "prod", 0)
+    store.load_latest("proj", "prod", 0)
+    store.invocation("proj", "prod", None)
+    assert not any(s.startswith(("ALTER", "CREATE")) for s in warehouse.statements)
+    assert all("NULL AS node_hashes" in s for s in warehouse.statements[1:])
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_warehouse_store_wraps_a_failed_alter(store_class, quote, dialect):
+    class AlterFails(FakeWarehouse):
+        def __call__(self, sql):
+            if sql.startswith("ALTER"):
+                raise RuntimeError("permission denied")
+            return super().__call__(sql)
+
+    with pytest.raises(StoreError, match="node_hashes.*permission denied"):
+        store_class("c", "s", "hodor_state", AlterFails(exists=True, columns=OLD_COLUMNS))
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_warehouse_store_load_latest_reads_any_action(store_class, quote, dialect, record):
+    warehouse = FakeWarehouse(rows=[record(node_hashes={"body": "b"}).to_row()])
+    store = store_class("c", "s", "hodor_state", warehouse, read_only=True)
+    assert store.load_latest("proj", "prod", 5)["c.s.fct"].node_hashes == {"body": "b"}
+    select = warehouse.statements[-1]
+    assert "action IN" not in select and "action =" not in select
+    assert sqlglot.parse_one(select, read=dialect).find(exp.Window) is not None
+
+
+def test_duckdb_load_latest_any_status_returns_a_failed_record(store, record):
+    build = record(record_id="a", recorded_at_ms=100)
+    failed = record(record_id="b", recorded_at_ms=200, status="error")
+    store.append([build, failed])
+    assert store.load_latest("proj", "prod", 0) == {"c.s.fct": build}
+    assert store.load_latest("proj", "prod", 0, any_status=True) == {"c.s.fct": failed}
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_warehouse_store_load_latest_any_status_drops_the_status_filter(
+    store_class, quote, dialect, record
+):
+    warehouse = FakeWarehouse(rows=[record(status="error").to_row()])
+    store = store_class("c", "s", "hodor_state", warehouse, read_only=True)
+    store.load_latest("proj", "prod", 5)
+    assert "status IN" in warehouse.statements[-1]
+    assert store.load_latest("proj", "prod", 5, any_status=True)["c.s.fct"].status == "error"
+    assert "status IN" not in warehouse.statements[-1]
+
+
+def test_postgres_store_load_latest_any_status_drops_the_status_filter(record):
+    from dbt_hodor.store.postgres import PostgresStore
+
+    statements = []
+    store = object.__new__(PostgresStore)
+    store._table, store._has_hashes = '"s"."hodor_state"', True
+
+    def run(sql, params):
+        statements.append((sql, params))
+        return [record(status="error").to_row()]
+
+    store._run = run
+    store.load_latest("proj", "prod", 5)
+    assert "status IN" in statements[-1][0]
+    assert store.load_latest("proj", "prod", 5, any_status=True)["c.s.fct"].status == "error"
+    assert "status IN" not in statements[-1][0]
+    assert statements[-1][1] == ["proj", "prod", 5]
+
+
+@pytest.mark.parametrize(("store_class", "quote", "dialect"), STORES)
+def test_warehouse_store_load_latest_for_selection_reads_reuse_records(
+    store_class, quote, dialect, record
+):
+    warehouse = FakeWarehouse(rows=[record(action="reuse", status="reused").to_row()])
+    store = store_class("c", "s", "hodor_state", warehouse, read_only=True)
+    assert store.load_latest("proj", "prod", 5, reused=True)["c.s.fct"].status == "reused"
+    assert "'reused')" in warehouse.statements[-1]
+    store.load_latest("proj", "prod", 5)
+    assert "'reused'" not in warehouse.statements[-1]
+
+
+def test_postgres_store_load_latest_for_selection_reads_reuse_records(record):
+    from dbt_hodor.store.postgres import PostgresStore
+
+    statements = []
+    store = object.__new__(PostgresStore)
+    store._table, store._has_hashes = '"s"."hodor_state"', True
+
+    def run(sql, params):
+        statements.append((sql, params))
+        return [record(action="reuse", status="reused").to_row()]
+
+    store._run = run
+    assert store.load_latest("proj", "prod", 5, reused=True)["c.s.fct"].status == "reused"
+    assert "'reused')" in statements[-1][0]
+    assert statements[-1][1] == ["proj", "prod", 5]

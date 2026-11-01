@@ -33,6 +33,10 @@ hodor on `dbt-databricks`, tested with `dbt-databricks` 1.12.7. Tested live on a
           package: "dbt-hodor"
     ```
 
+## Jobs
+
+A Databricks `dbt_task` job needs every command to start with `dbt`, so a wrapper CLI is not an option. hodor loads inside the dbt process, so the commands stay plain `dbt` commands.
+
 ## Profile
 
 ```yaml
@@ -56,6 +60,12 @@ my_project:
 
 The default store is [`delta`](../stores/delta.md). The other stores are [`duckdb`](../stores/duckdb.md) and [`postgres`](../stores/postgres.md) (alias `lakebase`). See [State stores](../stores/index.md).
 
+## Clones and dbt v2
+
+On dbt-core, hodor clones an unchanged table or incremental model from the base target with the adapter's `create_or_replace_clone`, a shallow clone on Databricks. Live tests on a Databricks workspace covered a shallow clone from the base target, `pre_clone` (the clone, then an incremental `MERGE` on top of it), a base table written since its build, which is not cloned, and a changed model built over its own clone of a table with automatic liquid clustering. See [Cloning](../how-it-works/decision-rules.md#cloning-from-the-base-target).
+
+On dbt v2 (`databricks` and `spark` dialects), clones are off unless `dbt-hodor serve` starts with `--allow-clones` (or `HODOR_ALLOW_CLONES=true`), because of the auto clustering limit below. With clones on, the server answers with `CREATE OR REPLACE TABLE ... SHALLOW CLONE`. dbt v2 data versions are epoch timestamps, not Delta tokens: see [dbt v2](../dbt-v2.md). A live test ran dbt 2.0.8 on a Databricks SQL warehouse: dbt ran the shallow clone and reported the node as cloned from the other environment.
+
 ## Data version
 
 hodor runs `DESCRIBE HISTORY <table> LIMIT 20` and reads `version`, `timestamp`, `operation` and `operationMetrics` of each commit. It runs one query per relevant table, in parallel on `hodor_metadata_threads` threads, and caches the result for the run. After hodor builds a table, it reads that table's history once more, so downstream nodes in the same run see the new version. If those 20 commits are all maintenance commits (see below), for example after many `OPTIMIZE`, `VACUUM` or tag commits by predictive optimization, hodor reads up to 1000 commits once more for that table.
@@ -78,5 +88,7 @@ Unknown operations count as changes on purpose. A new Delta operation name can c
 
 ## Limits
 
-- A view used as a source has an unknown version, so dependents build.
+- A source that is not a Delta table (a foreign table, a view) has an unknown version, so dependents build.
+- Not yet run in a large production project.
 - Delta paths on Volumes were not tested.
+- On dbt v2, a table cloned into a dev target cannot be replaced in place when its base table has automatic liquid clustering (`clusterByAuto`; the test workspace set it on tables created without `CLUSTER BY`). The shallow clone keeps the property, and dbt v2 replaces the table with `CREATE OR REPLACE TABLE ... AS SELECT`, which fails with `CLUSTER_BY_AUTO_UNSUPPORTED_TABLE_TYPE_ERROR`. In the live test this happened when the model's code changed after the clone, and `--full-refresh` failed the same way. Dropping the table in the dev target let the model build. The server runs no SQL, so it cannot drop the clone itself. This is why `dbt-hodor serve` clones only with `--allow-clones`. On dbt-core this does not happen: dbt-databricks 1.12.7 drops a shallow clone before it replaces it, and the live test rebuilt a changed model over its auto-clustered clone.

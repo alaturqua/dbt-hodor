@@ -10,9 +10,11 @@ from dbt_hodor.config import IDENT_RE
 from dbt_hodor.records import (
     COLUMN_NAMES,
     Record,
+    add_column_sql,
     create_table_sql,
     invocation_sql,
     latest_builds_sql,
+    latest_records_sql,
     prune_sql,
 )
 from dbt_hodor.store import StoreError
@@ -34,33 +36,60 @@ class DuckDBStore:
         self._error = duckdb.Error
         self._lock = threading.Lock()
         self._table = f'"{schema}"."{table}"'
+        self._has_hashes = True
         try:
             if read_only:  # dbt-hodor explain: never create the file, the schema or the table
                 self._con = duckdb.connect(path, read_only=True)
+                self._has_hashes = self._columns_include_hashes(schema, table)
                 return
             if path != ":memory:":
                 Path(path).parent.mkdir(parents=True, exist_ok=True)
             self._con = duckdb.connect(path)
             self._con.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
             self._con.execute(create_table_sql(self._table, "duckdb"))
+            if not self._columns_include_hashes(schema, table):
+                self._con.execute(add_column_sql(self._table, "duckdb"))
         except (OSError, duckdb.Error) as exc:
             raise StoreError(f"cannot open hodor state file {path!r}: {exc}") from exc
+
+    def _columns_include_hashes(self, schema: str, table: str) -> bool:
+        rows = self._con.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = ? AND table_name = ?",
+            [schema, table],
+        ).fetchall()
+        # no rows: the table is missing, and the read that follows reports it
+        return not rows or any(row[0] == "node_hashes" for row in rows)
 
     def load(
         self, project_name: str, target_name: str, since_ms: int, before_ms: int | None = None
     ) -> dict[str, Record]:
-        sql = latest_builds_sql(self._table, "?", "?", "?", None if before_ms is None else "?")
+        sql = latest_builds_sql(
+            self._table, "?", "?", "?", None if before_ms is None else "?", self._has_hashes
+        )
         params: list[object] = [project_name, target_name, since_ms]
         records = self._read(sql, params if before_ms is None else [*params, before_ms])
+        return {record.node_key: record for record in records}
+
+    def load_latest(
+        self,
+        project_name: str,
+        target_name: str,
+        since_ms: int,
+        any_status: bool = False,
+        reused: bool = False,
+    ) -> dict[str, Record]:
+        sql = latest_records_sql(self._table, "?", "?", "?", self._has_hashes, any_status, reused)
+        records = self._read(sql, [project_name, target_name, since_ms])
         return {record.node_key: record for record in records}
 
     def invocation(
         self, project_name: str, target_name: str, invocation_id: str | None
     ) -> list[Record]:
         if invocation_id is None:
-            sql = invocation_sql(self._table, "?", "?", None)
+            sql = invocation_sql(self._table, "?", "?", None, self._has_hashes)
             return self._read(sql, [project_name, target_name] * 2)
-        sql = invocation_sql(self._table, "?", "?", "?")
+        sql = invocation_sql(self._table, "?", "?", "?", self._has_hashes)
         return self._read(sql, [project_name, target_name, invocation_id])
 
     def _read(self, sql: str, params: list[object]) -> list[Record]:

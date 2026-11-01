@@ -9,9 +9,11 @@ from dbt_hodor.config import IDENT_RE
 from dbt_hodor.records import (
     COLUMN_NAMES,
     Record,
+    add_column_sql,
     create_table_sql,
     invocation_sql,
     latest_builds_sql,
+    latest_records_sql,
     prune_sql,
 )
 from dbt_hodor.store import StoreError
@@ -82,6 +84,9 @@ class PostgresStore:
         self._lock = threading.Lock()
         self._table = f'"{schema}"."{table}"'
         self._credential = credential
+        self._schema = schema
+        self._name = table
+        self._has_hashes = True
         self._conninfo = {
             "dbname": database,
             "host": host,
@@ -90,7 +95,11 @@ class PostgresStore:
             "sslmode": sslmode,
         }
         self._connect()
-        if read_only:  # dbt-hodor explain: never create the schema or the table
+        if read_only:  # dbt-hodor explain: never create or alter the schema or the table
+            try:
+                self._has_hashes = self._columns_include_hashes()
+            except Exception:  # noqa: BLE001 - the read that follows reports the problem
+                pass
             return
         try:
             self._run(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
@@ -100,6 +109,23 @@ class PostgresStore:
                 f"cannot create hodor state table {self._table} (needs CREATE on the database; "
                 f"or create it once manually with `dbt-hodor ddl`): {exc}"
             ) from exc
+        try:
+            if not self._columns_include_hashes():
+                self._run(add_column_sql(self._table, "postgres"))
+        except Exception as exc:  # noqa: BLE001
+            raise StoreError(
+                f"cannot add the node_hashes column to {self._table} (needs ALTER on the table; "
+                f"or run `ALTER TABLE {self._table} ADD COLUMN node_hashes TEXT` once): {exc}"
+            ) from exc
+
+    def _columns_include_hashes(self) -> bool:
+        rows = self._run(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s",
+            [self._schema, self._name],
+        )
+        # no rows: the table is missing, and the read that follows reports it
+        return not rows or any(row[0] == "node_hashes" for row in rows)
 
     def _connect(self) -> None:
         try:
@@ -140,18 +166,34 @@ class PostgresStore:
     def load(
         self, project_name: str, target_name: str, since_ms: int, before_ms: int | None = None
     ) -> dict[str, Record]:
-        sql = latest_builds_sql(self._table, "%s", "%s", "%s", None if before_ms is None else "%s")
+        sql = latest_builds_sql(
+            self._table, "%s", "%s", "%s", None if before_ms is None else "%s", self._has_hashes
+        )
         params: list[object] = [project_name, target_name, since_ms]
         records = self._read(sql, params if before_ms is None else [*params, before_ms])
+        return {record.node_key: record for record in records}
+
+    def load_latest(
+        self,
+        project_name: str,
+        target_name: str,
+        since_ms: int,
+        any_status: bool = False,
+        reused: bool = False,
+    ) -> dict[str, Record]:
+        sql = latest_records_sql(
+            self._table, "%s", "%s", "%s", self._has_hashes, any_status, reused
+        )
+        records = self._read(sql, [project_name, target_name, since_ms])
         return {record.node_key: record for record in records}
 
     def invocation(
         self, project_name: str, target_name: str, invocation_id: str | None
     ) -> list[Record]:
         if invocation_id is None:
-            sql = invocation_sql(self._table, "%s", "%s", None)
+            sql = invocation_sql(self._table, "%s", "%s", None, self._has_hashes)
             return self._read(sql, [project_name, target_name] * 2)
-        sql = invocation_sql(self._table, "%s", "%s", "%s")
+        sql = invocation_sql(self._table, "%s", "%s", "%s", self._has_hashes)
         return self._read(sql, [project_name, target_name, invocation_id])
 
     def _read(self, sql: str, params: list[object]) -> list[Record]:

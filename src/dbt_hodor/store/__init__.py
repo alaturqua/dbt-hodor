@@ -19,6 +19,18 @@ class StateStore(Protocol):
         """Latest successful build record per node_key, recorded in [since_ms, before_ms)."""
         ...
 
+    def load_latest(
+        self,
+        project_name: str,
+        target_name: str,
+        since_ms: int,
+        any_status: bool = False,
+        reused: bool = False,
+    ) -> dict[str, Record]:
+        """Latest successful record of any action per node_key, recorded at or after since_ms;
+        of any status too when `any_status`; reuse records of models too when `reused`."""
+        ...
+
     def invocation(
         self, project_name: str, target_name: str, invocation_id: str | None
     ) -> list[Record]:

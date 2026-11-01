@@ -33,14 +33,18 @@ from dbt_common.events.format import format_fancy_output_line
 from dbt_common.events.functions import fire_event
 from dbt_common.ui import green, red, yellow
 
+from dbt_hodor.clone import CLONED
 from dbt_hodor.engine import REUSE
 from dbt_hodor.plugin import ORIGINALS
 from dbt_hodor.runtime import (
     REPLAY_PREFIX,
     current_runtime,
+    defer_target,
+    defer_to_base,
     finish_runtime,
     get_runtime,
     start_runtime,
+    state_selection,
     warn,
 )
 
@@ -75,6 +79,53 @@ def execute_with_hooks(self: Any, selected_uids: Any) -> Any:
             warn(f"dbt-hodor: writing the last state records failed: {exc}")
 
 
+def _runtime_config() -> Any:
+    """The RuntimeConfig of the running dbt command; the selector method does not hold it."""
+    import click
+
+    context = click.get_current_context(silent=True)
+    obj = getattr(context, "obj", None)
+    return obj.get("runtime_config") if isinstance(obj, dict) else None
+
+
+def state_search(self: Any, included_nodes: Any, selector: str) -> Any:
+    """`state:` without --state: compare with the base target's records. With --state, or
+    without a base target, dbt-core's own method answers (and raises its own error)."""
+    original = ORIGINALS["StateSelectorMethod.search"]
+    if self.previous_state is not None:
+        return original(self, included_nodes, selector)
+    config = _runtime_config()
+    chosen = None
+    if config is not None:
+        # raises DbtRuntimeError when it cannot compare: a guessed selection is never safe
+        chosen = state_selection(config, self.manifest, selector, self.all_nodes(included_nodes))
+    if chosen is None:
+        return original(self, included_nodes, selector)
+    return iter(sorted(chosen))
+
+
+def get_deferred_manifest(self: Any) -> Any:
+    """`--defer` without --state: hodor sets the deferred relations from the base target's
+    records and dbt merges no manifest. When hodor does not defer, dbt-core's own method
+    answers (and raises its own error). Decided once per task: dbt-hodor asks before the run
+    starts and dbt asks again in before_run."""
+    original = ORIGINALS["GraphRunnableTask._get_deferred_manifest"]
+    args = self.args
+    if not args.defer or args.state or getattr(args, "defer_state", None):
+        return original(self)
+    deferred = getattr(self, "_hodor_deferred", None)
+    if deferred is None:
+        try:
+            selected = self.job_queue.get_selected_nodes()
+            deferred = defer_to_base(self.config, self.manifest, selected)
+        except Exception as exc:  # noqa: BLE001 - no hodor defer: dbt-core answers
+            base = defer_target(self.config)
+            warn(f"dbt-hodor could not defer{f' to {base}' if base else ''}: {exc}")
+            deferred = False
+        self._hodor_deferred = deferred
+    return None if deferred else original(self)
+
+
 def _result_line(original_key: str) -> Callable[[Any, Any], None]:
     """The result line with hodor's reason, for one runner class of the ModelRunner family."""
 
@@ -85,7 +136,7 @@ def _result_line(original_key: str) -> Callable[[Any, Any], None]:
         status = str(getattr(result.status, "value", result.status))
         if runtime is None or decision is None or status == "error":
             return original(self, result)
-        if status != "reused":
+        if status != "reused" and decision.reason != CLONED:
             message = result.message or "OK"
             if runtime.settings.mode == "shadow" and decision.action == REUSE:
                 message = f"{message} (shadow, could reuse: {decision.reason})"
@@ -137,16 +188,18 @@ def test_print_result_line(self: Any, result: Any) -> None:
 
 
 class LogModelResult(DbtLogModelResult):
-    """A model result line that starts with REUSED instead of 'OK created' for reused nodes.
+    """A model result line that starts with REUSED (or CLONED) instead of 'OK created' for
+    reused (or cloned) nodes.
 
     The class name must stay LogModelResult: it has to match dbt's protobuf message type.
     """
 
     def message(self) -> str:
-        if not self.status.startswith("REUSED"):
+        word = self.status.split(" ", 1)[0]
+        if word not in ("REUSED", "CLONED"):
             return super().message()
         return format_fancy_output_line(
-            msg=f"REUSED {self.description}",
+            msg=f"{word} {self.description}",
             status=green(self.status),
             index=self.index,
             total=self.total,

@@ -125,5 +125,5 @@
 <rect x="494" y="599" width="250" height="22" rx="11" fill="#f07a7d"/>
 <text x="618.85" y="614" font-size="11.5" font-weight="700" fill="#0b0e13" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace">new_upstream_data or volatile_sql</text>
 <text x="20" y="662" font-size="12" font-weight="400" fill="#a9b0bd" text-anchor="start">Rule 1: in shadow mode the rules run and the result is recorded, but the node builds.</text>
-<text x="20" y="682" font-size="12" font-weight="400" fill="#a9b0bd" text-anchor="start">Any error while deciding: build (hodor_error). hodor never fails a dbt run.</text>
+<text x="20" y="682" font-size="12" font-weight="400" fill="#a9b0bd" text-anchor="start">Any error while deciding: build (hodor_error). Exceptions that fail: state: selection, clone drop.</text>
 </svg>

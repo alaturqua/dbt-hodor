@@ -1,12 +1,14 @@
 # Getting started
 
+This page is for dbt-core. On dbt v2, start with [dbt v2](dbt-v2.md).
+
 !!! warning "Early development"
 
     `dbt-hodor` is available on PyPI. Be cautious before enabling reuse in production: run in shadow mode for at least a week of scheduled runs, review its decisions, and investigate any false reuses first. See [the rollout guidance](operations.md#rollout).
 
 ## Install
 
-hodor needs Python 3.10 or newer, `dbt-core` 1.12.x and `sqlglot` 30.22 or newer (below 31). dbt installs it as a plugin: dbt imports every installed `dbt_*` module that has a `plugins` attribute, so no dbt configuration is needed to load hodor.
+hodor needs Python 3.10 or newer (CI tests 3.10 and 3.12), `dbt-core` 1.12.x and `sqlglot` 30.22 or newer (below 31). dbt installs it as a plugin: dbt imports every installed `dbt_*` module that has a `plugins` attribute, so no dbt configuration is needed to load hodor.
 
 === "uv"
 
@@ -112,7 +114,7 @@ The first run has no history, so every node builds and hodor records it (`no_his
 
 ```text
 dbt-hodor <installed version> is enabled for dbt build
-dbt-hodor <installed version>: mode on, 0 build records for hodor_e2e/local
+dbt-hodor <installed version>: mode on, 0 build records for hodor_demo/local
 4 of 8 OK created sql table model main.fct_orders .............................. [OK (no_history) in 0.05s]
 7 of 8 PASS not_null_fct_orders_id ............................................. [PASS in 0.09s]
 dbt-hodor: 0 reused, 8 built, 0 fail-open errors
@@ -121,7 +123,7 @@ dbt-hodor: 0 reused, 8 built, 0 fail-open errors
 In the second run, with no new data and no code change, you see lines like these:
 
 ```text
-dbt-hodor <installed version>: mode on, 8 build records for hodor_e2e/local
+dbt-hodor <installed version>: mode on, 8 build records for hodor_demo/local
 3 of 8 REUSED sql view model main.stg_orders ................................... [REUSED (view_unchanged) in 0.01s]
 4 of 8 REUSED sql table model main.fct_orders .................................. [REUSED (no_new_data) in 0.01s]
 7 of 8 PASS not_null_fct_orders_id ............................................. [PASS (replayed) in 0.02s]
@@ -133,7 +135,7 @@ The `dbt-hodor:` line at the end is the summary. A built model shows its reason,
 In `shadow` mode every node builds, and the bracket shows what hodor would have done:
 
 ```text
-dbt-hodor <installed version>: mode shadow, 8 build records for hodor_e2e/local
+dbt-hodor <installed version>: mode shadow, 8 build records for hodor_demo/local
 4 of 8 OK created sql table model main.fct_orders .............................. [OK (shadow, could reuse: no_new_data) in 0.06s]
 dbt-hodor: 3 could be reused, 5 need a build (shadow: all built), 0 fail-open errors
 ```

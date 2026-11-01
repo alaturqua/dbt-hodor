@@ -8,9 +8,11 @@ from dbt_hodor.config import IDENT_RE
 from dbt_hodor.records import (
     COLUMN_NAMES,
     Record,
+    add_column_sql,
     create_table_sql,
     invocation_sql,
     latest_builds_sql,
+    latest_records_sql,
     prune_sql,
 )
 from dbt_hodor.store import StoreError
@@ -69,14 +71,20 @@ class DeltaStore:
         self._table = quote_table(database, schema, table, quote=self._quote)
         self._execute = execute
         self._batch_size = batch_size
-        if read_only:  # dbt-hodor explain: never create the table
-            return
+        self._has_hashes = True
         try:
             # Job principals often hold MODIFY but not CREATE TABLE, so only create when missing.
-            self._execute(f"SELECT * FROM {self._table} LIMIT 0")
-            return
+            columns = [str(row[0]) for row in self._execute(f"DESCRIBE {self._table}")]
         except Exception:  # noqa: BLE001 - most likely the table does not exist yet
-            pass
+            columns = None
+        if columns is not None:
+            self._has_hashes = "node_hashes" in columns
+        if read_only:  # dbt-hodor explain: never create or alter the table
+            return
+        if columns is not None:
+            if not self._has_hashes:
+                self._add_hashes_column()
+            return
         try:
             # The schema is not created: it needs catalog-level grants, so it must already exist.
             self._execute(create_table_sql(self._table, self._dialect))
@@ -85,6 +93,16 @@ class DeltaStore:
                 f"cannot create hodor state table {self._table} (needs CREATE TABLE on the "
                 f"schema; or create it once manually with `dbt-hodor ddl`): {exc}"
             ) from exc
+
+    def _add_hashes_column(self) -> None:
+        try:
+            self._execute(add_column_sql(self._table, self._dialect))
+        except Exception as exc:  # noqa: BLE001 - any adapter error means fail open
+            raise StoreError(
+                f"cannot add the node_hashes column to {self._table} (needs ALTER on the "
+                f"table; or add it once manually, see the upgrade notes): {exc}"
+            ) from exc
+        self._has_hashes = True
 
     def load(
         self, project_name: str, target_name: str, since_ms: int, before_ms: int | None = None
@@ -95,6 +113,26 @@ class DeltaStore:
             self._literal(target_name),
             self._literal(since_ms),
             None if before_ms is None else self._literal(before_ms),
+            self._has_hashes,
+        )
+        return {record.node_key: record for record in self._read(sql)}
+
+    def load_latest(
+        self,
+        project_name: str,
+        target_name: str,
+        since_ms: int,
+        any_status: bool = False,
+        reused: bool = False,
+    ) -> dict[str, Record]:
+        sql = latest_records_sql(
+            self._table,
+            self._literal(project_name),
+            self._literal(target_name),
+            self._literal(since_ms),
+            self._has_hashes,
+            any_status,
+            reused,
         )
         return {record.node_key: record for record in self._read(sql)}
 
@@ -103,7 +141,11 @@ class DeltaStore:
     ) -> list[Record]:
         invocation = None if invocation_id is None else self._literal(invocation_id)
         sql = invocation_sql(
-            self._table, self._literal(project_name), self._literal(target_name), invocation
+            self._table,
+            self._literal(project_name),
+            self._literal(target_name),
+            invocation,
+            self._has_hashes,
         )
         return self._read(sql)
 

@@ -456,7 +456,7 @@ svg.door { width:100%; max-height:250px; }
       </div>
     </div>
   </div>
-  <div class="note"><b>Status: early development.</b> The engine and the stores pass end-to-end tests on dbt-duckdb, and live tests on Databricks, Trino (Iceberg) and Snowflake. It has not run in a large production project yet. Start in shadow mode (tab 8) to see its decisions before it skips anything.</div>
+  <div class="note"><b>Status: early development.</b> The engine and the stores pass end-to-end tests on dbt-duckdb, and live tests on Databricks, Trino (Iceberg) and Lakebase Postgres. The Snowflake live test did not run for the current version. It has not run in a large production project yet. Start in shadow mode (tab 8) to see its decisions before it skips anything.</div>
 </section>
 
 <!-- 2 NAME -->
@@ -705,7 +705,7 @@ svg.door { width:100%; max-height:250px; }
     <div class="col">
       <div class="card">
         <h3>Fail open</h3>
-        <p>Every error leads to a build, never to a reuse. hodor never fails a dbt run.</p>
+        <p>Every error leads to a build, never to a reuse. hodor does not fail a dbt run, with three exceptions: a <code>state:</code> selector that cannot compare fails the run; an incremental node whose partial clone cannot be dropped fails that node; and on dbt-core, <code>--defer</code> without <code>--state</code> fails the run when hodor cannot supply the base target. See <a href="../how-it-works/decision-rules/#state-selection">Decision rules</a> and <a href="../how-it-works/decision-rules/#defer-without-state">Defer without --state</a>.</p>
         <div class="tw"><table>
           <tr><th>Failure</th><th>Behavior</th></tr>
           <tr><td>Exception while deciding a node</td><td>Warning, normal build, reason <code>hodor_error</code></td></tr>
@@ -730,7 +730,7 @@ svg.door { width:100%; max-height:250px; }
 <section role="tabpanel" id="p9" aria-labelledby="tab-9" hidden>
   <div class="ph">
     <h2>Slim CI</h2>
-    <p class="lead">A pull request builds its changes into its own schema and reads the rest from a base target with <code>--defer --state</code>. The base target is what the pull request is compared with: the main catalog of the same environment, or prod. Pick a scenario to see what hodor does on each push and on the deploy. The lines are simulated, not recorded.</p>
+    <p class="lead">A pull request builds its changes into its own schema and reads the rest from a base target with <code>--defer --state</code>. The base target is what the pull request is compared with: the main catalog of the same environment, or another environment. Pick a scenario to see what hodor does on each push and on the deploy. The lines are simulated, not recorded.</p>
   </div>
   <div class="scen" id="ciscen" role="group" aria-label="Slim CI scenario"></div>
   <p id="cidesc" class="simdesc" aria-live="polite"></p>
@@ -771,7 +771,7 @@ svg.door { width:100%; max-height:250px; }
     </div>
     <div class="docbody" id="docbody" tabindex="0" role="region" aria-label="Docs">
   <h2>Docs</h2>
-  <div class="note"><b>Early development.</b> The engine and stores pass end-to-end tests on dbt-duckdb and live tests on Databricks, Trino (Iceberg) and Snowflake. Not yet proven in a large production project.</div>
+  <div class="note"><b>Early development.</b> The engine and stores pass end-to-end tests on dbt-duckdb and live tests on Databricks, Trino (Iceberg) and Lakebase Postgres. The Snowflake live test did not run for the current version. Not yet proven in a large production project.</div>
 
   <h3 id="d-what">What it is</h3>
   <p>A free, self-hosted alternative to dbt Labs' dbt State. It runs inside dbt as an auto-loaded plugin (module <code>dbt_hodor</code>). It needs no dbt platform account and sends nothing to external services. dbt-core 1.12.x; adapters dbt-databricks 1.12.7, dbt-trino 1.10.6 (Iceberg and Delta Lake connectors; Delta Lake connector: unit tests only), dbt-snowflake 1.12.4 (state in DuckDB or Postgres), and dbt-duckdb for local development and tests.</p>
@@ -781,7 +781,7 @@ svg.door { width:100%; max-height:250px; }
 <pre><code>pip install dbt-hodor
 # local DuckDB state store:
 pip install "dbt-hodor[duckdb]"</code></pre>
-  <p>Requires Python 3.10 or newer. If upstream <code>dbt_state</code> is also installed, hodor disables itself with a warning.</p>
+  <p>Requires Python 3.10 or newer (CI tests 3.10 and 3.12). If upstream <code>dbt_state</code> is also installed, hodor disables itself with a warning.</p>
 
   <h3 id="d-more">Adapters, stores and settings</h3>
   <p>The reference pages hold the details:</p>
@@ -819,7 +819,7 @@ Run again with --yes to delete them.</code></pre>
   <p>The last line of a run: <code>dbt-hodor: N reused, M built, K fail-open errors</code>. In shadow mode: <code>dbt-hodor: N could be reused, M need a build (shadow: all built), K fail-open errors</code>.</p>
 
   <h3 id="d-ci">Slim CI</h3>
-  <p>hodor works with <code>-s state:modified+ --defer --state &lt;prod manifest&gt;</code>, with or without <code>--favor-state</code>. Catalog and schema names of the project's own nodes are replaced by the node's id before hashing, so a CI catalog or a schema per pull request, under any naming scheme, is not a code change. Each push reuses what the last push built. A table made by <code>dbt clone</code> has no hodor record, so it builds once, then is reused. A deploy compares only with the target's own history. Try it in the Slim CI tab.</p>
+  <p>hodor works with <code>-s state:modified+ --defer --state &lt;base manifest&gt;</code>, with or without <code>--favor-state</code>. Catalog and schema names of the project's own nodes are replaced by the node's id before hashing, so a CI catalog or a schema per pull request, under any naming scheme, is not a code change. Each push reuses what the last push built. A table made by <code>dbt clone</code> has no hodor record, so it builds once, then is reused. A deploy compares only with the target's own history. Try it in the Slim CI tab.</p>
 
   <h3 id="d-scope">Scope</h3>
   <p>Commands: <code>run</code>, <code>build</code>, <code>test</code>, <code>seed</code> and <code>snapshot</code>.</p>
@@ -828,7 +828,7 @@ Run again with --yes to delete them.</code></pre>
   <p>A seed is reused when the CSV content (sha256 of the file, line endings normalized) and its config are unchanged and its table was not written outside dbt. A snapshot follows the table rules: code, config and upstream data unchanged, and its target not written outside dbt. <code>lag_tolerance</code> applies to snapshots too.</p>
 
   <h3 id="d-limit">Known limit</h3>
-  <div class="note">A change to a materialization macro, for example a dbt-databricks upgrade, does not show in the compiled SQL. Run once with <code>HODOR_MODE=off</code> after such an upgrade.</div>
+  <div class="note">A change to a materialization macro, for example a dbt-databricks upgrade, does not show in the compiled SQL. Run once with <code>HODOR_MODE=shadow</code> after such an upgrade: shadow builds every node and records the builds.</div>
     </div>
   </div>
 </section>
@@ -1384,7 +1384,7 @@ Run again with --yes to delete them.</code></pre>
     { n: 5, r: 'relation_missing', c: 'the relation is missing from the warehouse', d: 'build' },
     { n: 6, r: 'code_changed', c: 'code hash differs from the record (with compare_unrendered_code, rendered and unrendered hashes must both differ)', d: 'build' },
     { n: 7, r: 'config_changed', c: 'config hash differs from the record (config, column types, constraints, masks, and project macros the materialization or hooks run)', d: 'build' },
-    { n: 8, r: 'target_modified', c: 'tables and incrementals: the target data version differs from the one recorded after the last build', d: 'build' },
+    { n: 8, r: 'target_modified', c: 'tables, incrementals, seeds, snapshots and views: the target data version differs from the one recorded after the last build', d: 'build' },
     { n: 9, r: 'select_star_view', c: 'a view whose final SELECT * reads directly from a ref() or source()', d: 'build' },
     { n: 10, r: 'view_unchanged', c: 'the node is a view and its definition is unchanged', d: 'reuse' },
     { n: 11, r: 'unknown_upstream', c: 'any upstream table has an unknown data version', d: 'build' },

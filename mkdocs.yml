@@ -113,6 +113,8 @@ nav:
       - Configuration: configuration.md
       - Operations: operations.md
       - Slim CI: slim-ci.md
+      - dbt-core and dbt v2: dbt-core-vs-dbt-v2.md
+      - dbt v2: dbt-v2.md
       - Upgrading: upgrading.md
   - Interactive guide: guide/index.html
   - Reference:
