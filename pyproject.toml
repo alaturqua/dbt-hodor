@@ -33,24 +33,32 @@ lakebase = [
     "databricks-sdk>=0.81",
 ]
 
+v2 = [
+    "grpcio>=1.81.1",
+    "protobuf>=6.33.5",
+]
+
 [build-system]
 requires = ["uv_build>=0.11.2,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not benchmark and not databricks and not postgres and not trino and not snowflake'"
+addopts = "-m 'not benchmark and not databricks and not postgres and not trino and not snowflake and not dbt_v2'"
 markers = [
     "benchmark: performance benchmarks, run with -m benchmark",
     "databricks: live tests against a Databricks workspace, run with -m databricks",
     "postgres: live tests against Postgres or Lakebase, run with -m postgres",
     "trino: live tests against a Trino container, run with -m trino",
     "snowflake: live tests against a Snowflake account, run with -m snowflake",
+    "dbt_v2: live tests of dbt v2 (dbt-oss) on Databricks, run with -m dbt_v2",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+extend-exclude = ["src/dbt_hodor/v2/proto"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
@@ -63,6 +71,9 @@ dev = [
     "dbt-snowflake==1.12.4",
     "duckdb>=1.0",
     "git-cliff>=2.6",
+    "grpcio>=1.81.1",
+    "grpcio-tools==1.81.1",
+    "protobuf>=6.33.5",
     "pytest>=9.1.1",
     "ruff>=0.17.1",
 ]

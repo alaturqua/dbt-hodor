@@ -1,6 +1,6 @@
 # Run flow
 
-hodor loads inside the dbt process. A Databricks `dbt_task` job needs every command to start with `dbt`, so a wrapper CLI is not an option.
+hodor loads inside the dbt process, so dbt is started as usual and no wrapper command is needed. For why this matters on Databricks jobs, see [Databricks](../adapters/databricks.md#jobs).
 
 ![hodor loads with dbt, reads the build records and data versions once, then for each node reuses or builds, queues a record, writes the records and prints a summary line](../assets/run-flow-light.svg#only-light)
 ![hodor loads with dbt, reads the build records and data versions once, then for each node reuses or builds, queues a record, writes the records and prints a summary line](../assets/run-flow-dark.svg#only-dark)
@@ -18,7 +18,7 @@ hodor loads inside the dbt process. A Databricks `dbt_task` job needs every comm
 
 ## Fail open
 
-An exception anywhere in hodor for a node is logged as a warning, and the node builds as plain dbt would (reason `hodor_error`). See [Operations](../operations.md#fail-open).
+An exception anywhere in hodor for a node is logged as a warning, and the node builds as plain dbt would (reason `hodor_error`). hodor does not fail a dbt run, with three exceptions: a `state:` selector that cannot compare fails the run; an incremental node whose partial clone cannot be dropped fails that node; and on dbt-core, `--defer` without `--state` fails the run when hodor cannot supply the base target. See [Decision rules](decision-rules.md#state-selection) and [Defer without --state](decision-rules.md#defer-without-state). See also [Operations](../operations.md#fail-open).
 
 ## Import cost
 

@@ -9,6 +9,7 @@ The point of this store is that state lives outside the warehouse: point reads a
 - Writes: one `executemany` per flush. Reads: one statement at run start.
 - Concurrency: appends from concurrent jobs do not conflict.
 - Connections are opened once per run and reopened once on a dropped connection or an expired token.
+- Run live once against Lakebase for this version, in a one-off check outside the test suite: the migration that adds the `node_hashes` column to an existing table, the read that adds failed records for defer and clone, and the read that adds reuse records for `state:` selection. The live test in `tests/e2e/test_postgres_state.py` does not cover them; unit tests cover the SQL and the calls.
 
 === "Lakebase"
 

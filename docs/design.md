@@ -1,6 +1,9 @@
 # dbt-hodor design
 
 Status: approved 2026-10-20
+
+This is the design spec. Where it and the other docs pages differ, the docs pages describe the current behaviour.
+
 Name: **hodor**, for "Hold Old Data, Or Rebuild". Distribution `dbt-hodor`, Python module `dbt_hodor`.
 
 ## 1. Goal
@@ -42,11 +45,17 @@ Main target: large scheduled dbt runs on Databricks that rebuild every model in 
 
 ### Out of scope, always built as normal dbt
 
-- The node configs `pre_clone`, `allow_clones` and `defer_to_target`, and `state:*` selectors backed by hodor. dbt's own `--defer` is supported (see [Slim CI](slim-ci.md)).
 - Python models, microbatch models, materialized views, streaming tables, metric views, custom materializations and unit tests. Reasons: microbatch windows depend on the run time, so a reuse could skip a new window; Python models have no SQL to trace inputs from; dbt-databricks already turns an unchanged metric view into `select 1`; unit tests may come later.
-- dbt v2 (Fusion).
 
 Configs that are out of scope are accepted and ignored, with one warning per run.
+
+Since this spec was written, three things moved from out of scope to supported:
+
+- `defer_to_target`, `allow_clones` and `pre_clone`: state selection, defer without `--state` and clones from the base target. See [Configuration](configuration.md) and [Decision rules](how-it-works/decision-rules.md#cloning-from-the-base-target).
+- `state:` selectors backed by hodor's records.
+- dbt v2 (Fusion), through the local state server `dbt-hodor serve`. See [dbt v2](dbt-v2.md).
+
+The sections below describe the dbt-core run unless they say otherwise.
 
 ## 4. Architecture
 
@@ -62,7 +71,9 @@ dbt process
      ├─ providers.py  per adapter queries: Databricks, Trino, Snowflake, DuckDB
      ├─ engine.py     pure decision rules (no I/O)
      ├─ store/        StateStore protocol: delta.py, trino.py, duckdb.py, postgres.py
-     └─ cli.py        dbt-hodor ddl, explain, prune
+     ├─ clone.py, defer.py, selection.py   pure rules for clones, defer and state selection
+     ├─ v2/           the dbt v2 state server and request mapping
+     └─ cli.py        dbt-hodor ddl, explain, prune, serve
 ```
 
 Each unit has one job:
@@ -77,7 +88,7 @@ The upstream gRPC, auth, telemetry, dispatcher, session and version-check code (
 
 ### 4.1 Run flow
 
-1. **initialize()** reads the mode. With `off`, or for any command other than `run`, `build` or `test`, it installs nothing. If upstream `dbt_state` is also installed, hodor disables itself with a warning, to avoid patching the same methods twice. Otherwise it installs the patches.
+1. **initialize()** reads the mode. With `off`, or for any command other than `run`, `build`, `test`, `seed` or `snapshot`, it installs nothing. If upstream `dbt_state` is also installed, hodor disables itself with a warning, to avoid patching the same methods twice. Otherwise it installs the patches.
 2. **First node, before execution:**
    - open the store and load the latest record for every selected node with one query;
    - read the warehouse clock in epoch milliseconds with one query (`unix_millis(current_timestamp())` on Databricks, `epoch_ms(current_timestamp)` on DuckDB);
@@ -89,7 +100,7 @@ The upstream gRPC, auth, telemetry, dispatcher, session and version-check code (
    - **build:** call the original `execute`, then read the table's new version and data version from the metadata provider, update the run's metadata cache, and queue a record.
 4. **Each test node:** the same flow. A replayed test returns its recorded `TestStatus` (pass, warn or fail) with the recorded failure count and a "replayed" message. `TestStatus` has no `Reused` value, so the patched result line shows the replay.
 5. **Records** are queued in memory and flushed in batches: every 200 records, and at the end of the run, including after errors and interrupts.
-6. **Run summary:** one line, `hodor: N reused, M built, K fail-open errors`.
+6. **Run summary:** one line, `dbt-hodor: N reused, M built, K fail-open errors`.
 
 ## 5. Decision rules
 
@@ -104,11 +115,12 @@ The engine checks the following rules in order. The first rule that matches deci
 | 5 | the relation is missing from the warehouse (dbt's relation cache) | build | `relation_missing` |
 | 6 | the code hash differs from the record (with `compare_unrendered_code`: rendered and unrendered hashes both differ) | build | `code_changed` |
 | 7 | the config hash differs from the record | build | `config_changed` |
-| 8 | tables, incrementals and views: the target's current data version differs from the data version recorded after its last build (something wrote data to it outside this node's builds). Maintenance commits such as OPTIMIZE do not change the data version, so they never trigger this rule. A view's data version is a hash of its definition in the warehouse | build | `target_modified` |
+| 8 | tables, incrementals, seeds, snapshots and views: the target's current data version differs from the data version recorded after its last build (something wrote data to it outside this node's builds). Maintenance commits such as OPTIMIZE do not change the data version, so they never trigger this rule. A view's data version is a hash of its definition in the warehouse | build | `target_modified` |
 | 9 | a view whose final `SELECT *` reads directly from a `ref()` or `source()` | build | `select_star_view` |
 | 10 | the node is a view (its definition is unchanged, see rule 6) | reuse | `view_unchanged` |
 | 11 | any upstream table has an unknown data version (section 7.2) | build | `unknown_upstream` |
 | 12 | a view between this node and its upstream tables has other code than at the node's last build | build | `upstream_code_changed` |
+| 12a | dbt v2 only: an upstream version within one second of the last build (see [Decision rules](how-it-works/decision-rules.md)) | build | `same_second_read`, or `unknown_upstream` |
 | 13 | no upstream changed since the last build (`any`), or not all of them changed (`all`) | reuse | `no_new_data` |
 | 14 | upstream changed, but the last build is younger than `lag_tolerance` | reuse | `within_lag_tolerance` |
 | 15 | otherwise | build | `new_upstream_data`, or `volatile_sql` when only volatile values changed |
@@ -118,7 +130,7 @@ Rule 10 follows dbt State: a view always shows current upstream data, so new dat
 - **"Upstream changed"**: an upstream table's current data version differs from the data version recorded for it at the node's last build. Versions are compared for equality, not order, and the token holds the commit time, so a dropped and recreated table (Delta versions restart at 0) still counts as changed.
 - **"Last build"**: the `built_at_ms` of the latest record with action `build`. Reuse records do not reset the clock.
 - **Tests** use every rule except the view rules (`select_star_view`, `view_unchanged`) and `within_lag_tolerance`. Their upstreams are the nodes they test. `lag_tolerance` is always 0 for tests, as in upstream.
-- **Fail open.** An exception anywhere in hodor for a node is logged as a warning, and the node builds as normal dbt would (reason `hodor_error`). hodor never fails a dbt run.
+- **Fail open.** An exception anywhere in hodor for a node is logged as a warning, and the node builds as normal dbt would (reason `hodor_error`). hodor does not fail a dbt run, with three exceptions: a `state:` selector that cannot compare fails the run; an incremental node whose partial clone cannot be dropped fails that node; and on dbt-core, `--defer` without `--state` fails the run when hodor cannot supply the base target. See [Decision rules](how-it-works/decision-rules.md#state-selection) and [Defer without --state](how-it-works/decision-rules.md#defer-without-state).
 
 ## 6. Hashing
 
@@ -212,7 +224,7 @@ Portable types only: text and bigint, with JSON stored as text. Times are epoch 
 | mode | text | `shadow` or `on` |
 | decision | text | what the engine decided: `build` or `reuse` |
 | reason | text | reason code from section 5 |
-| action | text | what actually happened: `build` or `reuse`. In shadow mode always `build` |
+| action | text | what actually happened: `build`, `reuse`, `clone`, `carry` (a copy of a build record) or `stale` (dbt v2 seeds). In shadow mode always `build` |
 | status | text | dbt status: success, error, pass, warn, fail |
 | text_hash, code_hash, unrendered_hash, config_hash, hash_version | text | section 6 |
 | sql_facts | text (JSON) | stored SQL analysis for the fast path: select-star flag, table references, Delta paths, opaque inputs |
@@ -235,8 +247,8 @@ Portable types only: text and bigint, with JSON stored as text. Times are epoch 
 - **Layout:** `CLUSTER BY (target_name, node_key)`, so the run-start read and the lookback filter skip most files as history grows.
 - **Writes:** batched `INSERT INTO ... VALUES`, 500 rows per statement, run through dbt's own adapter connection. hodor needs no other credentials or drivers.
 - **Concurrency:** blind appends from concurrent jobs do not conflict in Delta.
-- **Security:** anyone who can write this table can force reuse in prod. Grant MODIFY only to the job service principals; everyone else gets SELECT.
-- **Input validation:** the table name is checked against `^[A-Za-z0-9_]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+$` and quoted. Values are escaped.
+- **Security:** anyone who can write this table can force reuse in any target that uses it. Grant MODIFY only to the job service principals; everyone else gets SELECT.
+- **Input validation:** each part of the table name is checked against `^[A-Za-z0-9_][A-Za-z0-9_-]*$` and quoted. Values are escaped.
 
 ### 8.3 `duckdb` store (local)
 
@@ -265,7 +277,8 @@ Any Postgres, Databricks Lakebase included. `lakebase` is an alias for `postgres
 | compare_unrendered_code | `false` | boolean |
 | execute_hooks_on_any_reuse | `false` | boolean. `execute_hooks_on_reuse`, the spelling in the dbt-core 1.12.5 schema, is also accepted |
 | evaluate_volatile_sql | auto | boolean. Auto: volatile functions that decide rows or values are upstreams (`volatile:date`, `volatile:session`, `volatile:always`), stamp columns are not. `true`: stamps count too. `false`: nothing counts |
-| pre_clone | ignored | warning once |
+
+`pre_clone`, `allow_clones` and `defer_to_target` are no longer ignored; see [Configuration](configuration.md) and [Decision rules](how-it-works/decision-rules.md#cloning-from-the-base-target) for the current behaviour.
 
 - **Where to set them:** in YAML (`dbt_project.yml` `+state:` or the model properties file). dbt-core 1.12.5 warns (D027) about these keys in SQL `config()`.
 - **Merging:** hodor installs upstream's merge patch, so `state:` is merged key by key across project, folder and model levels (upstream `plugin.py:170-229`).
@@ -289,14 +302,14 @@ Set as keys on the active `profiles.yml` target. An environment variable of the 
 - **Store location:** database, schema and table are separate settings, each checked against `^[A-Za-z0-9_][A-Za-z0-9_-]*$` and always quoted. `delta` has no default schema, so hodor writes nothing to a catalog until someone names one; without it hodor is off with a warning. `delta` never creates the schema (that needs catalog-level grants); `duckdb` and `postgres` create schema and table.
 - **Env prefix:** `HODOR_` keeps clear of dbt's reserved `DBT_ENGINE_` prefix.
 - **Per run:** `hodor_<name>` keys in `--vars` override the profile key. Precedence: env var, `--vars`, profile key, default. A plugin cannot add CLI flags: dbt parses them before plugins load (`dbt/cli/requires.py:333`), so `--no-hodor` fails with `No such option`. `--manage-state` does not exist in dbt-core 1.12, and `DBT_ENGINE_MANAGE_STATE` warns there (`dbt/env_vars.py:31-41`). Both switch on dbt Labs' dbt State in 1.13, so hodor does not read them. YAML booleans `true`/`false` (unquoted `on`/`off`) are accepted for `hodor_mode`.
-- **Open item:** whether dbt-databricks accepts unknown keys in a profile target is checked in the spike. If it does not, the settings move to `dbt_project.yml` `vars: {hodor: {...}}`, still with env var override.
+- **Profile keys:** dbt-databricks accepts the `hodor_*` keys on a profile target; the live Databricks tests set `hodor_schema` there. The settings stay on the target.
 
 ### 9.3 CLI
 
 `dbt-hodor explain [-s <unique_id or name>] [--invocation <id>] [--json] [--summary]` reads decisions from the store configured for the current project and target:
 
 - `duckdb`: directly;
-- `delta`: through `databricks-sql-connector`, using the profile's connection settings. The connector is already a dependency of dbt-databricks.
+- `delta`: through the dbt adapter connection of the profile (see below).
 
 It prints each decision with its reason, the hashes compared and the upstream versions.
 
@@ -307,7 +320,7 @@ How it works:
 - Default: the latest invocation of the project and target. Each record is compared with the latest successful build before the invocation's first record, inside `hodor_lookback_days`, which is the same window the run loaded.
 - `-s` matches a unique_id, a relation or a node name, and filters inside one invocation. With no match it exits with a hint to pass `--invocation`.
 
-Every dbt log line for a reused node also states the reason. For example: `REUSED no_new_data (last build 2026-10-19 04:12 UTC)`.
+Every dbt log line for a reused node also states the reason. For example: `REUSED (no_new_data)`.
 
 ## 10. Error handling
 
@@ -321,7 +334,7 @@ Every dbt log line for a reused node also states the reason. For example: `REUSE
 | Upstream `dbt_state` installed as well | hodor disables itself with a warning |
 | Interrupt (Ctrl+C, job cancel) | queued records are flushed if possible; missing records only cause extra builds |
 
-Every failure leads to a build, never to a reuse. That is the safety rule.
+Every failure leads to a build, never to a reuse. That is the safety rule. The three exceptions that fail, a `state:` selector that cannot compare, an incremental node whose partial clone cannot be dropped, and on dbt-core a `--defer` without `--state` that hodor cannot answer, are in [Decision rules](how-it-works/decision-rules.md#state-selection).
 
 ## 11. Spike (before engine work)
 
@@ -377,10 +390,10 @@ Attribution and trademarks: [License](license.md) and `NOTICE`.
 
 ## 14. Rollout
 
-1. dev: `shadow` for at least a week of scheduled runs.
+1. `shadow` for at least a week of scheduled runs.
 2. Check the shadow records. A **false reuse** is a node recorded with decision `reuse` whose actual build in the same run created a data change (section 8.1). Fix every false reuse before moving on.
    - This check is strong for incremental models: a build with no new input writes no rows. It is weak for `table` models, because `CREATE OR REPLACE` writes a new version with rows even when the content is identical. For tables, shadow mode measures the would-reuse rate but cannot prove each decision.
-3. dev: `on`. Test or staging: `shadow`, then `on`. prod: `shadow`, then `on`.
+3. Switch a target to `on` once its shadow records show no false reuse. The mode is set per target, so each environment can run `shadow` first.
 4. Success measures: the share of nodes reused in the main daily run, the run's wall time, and zero false reuses.
 
 ## 15. Performance
@@ -393,7 +406,7 @@ hodor must cost far less than the work it saves. Budget and rules:
   - metadata: 1 `information_schema.tables` query per catalog, plus `DESCRIBE HISTORY` only for tables whose `last_altered` moved, if the spike validates `last_altered`;
   - if it does not, 1 `DESCRIBE HISTORY` per relevant table, on `hodor_metadata_threads` threads.
 - **Caching:** a table's data version is read at most once per run (single-flight cache), and again only after hodor builds that table. Each node's base tables are resolved once per run (memoized lineage).
-- **Imports:** dbt imports every `dbt_*` module on every command, including `ls` and `parse`. So `import dbt_hodor` loads nothing heavy; sqlglot and duckdb load only when hodor is active for `run`, `build` or `test`.
+- **Imports:** dbt imports every `dbt_*` module on every command, including `ls` and `parse`. So `import dbt_hodor` loads nothing heavy; sqlglot and duckdb load only when hodor is active for `run`, `build`, `test`, `seed` or `snapshot`.
 - **GIL:** sqlglot is CPU-bound Python and does not run in parallel across dbt threads. That is why the fast path matters more than threading.
 - **Benchmarks** live in the test suite (marked `benchmark`, skipped by default) and run before each release: hashing per file, and the decision path for 10,000 synthetic nodes.
 

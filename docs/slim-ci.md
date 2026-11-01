@@ -1,6 +1,6 @@
 # Slim CI
 
-A common slim CI setup builds only the changed models of a pull request (`-s state:modified+`) into a CI catalog or a CI schema. It reads everything else from a base target with `--defer --state <base manifest>`. The base target is whatever the pull request is compared with: the main catalog of the same environment, or prod. hodor works with that setup, and with dbt's own `dbt clone`. It adds two things:
+A common slim CI setup builds only the changed models of a pull request (`-s state:modified+`) into a CI catalog or a CI schema. It reads everything else from a base target with `--defer --state <base manifest>`. The base target is whatever the pull request is compared with: the main catalog of the same environment, or another environment. hodor works with that setup, and with dbt's own `dbt clone`. It adds two things:
 
 - Each push to the pull request reuses what the last push built, when the code and the data it reads are unchanged.
 - Renamed catalogs and schemas between targets do not count as code changes.
@@ -17,7 +17,7 @@ The examples on this page use two targets in one environment, for example dev:
 | `base` | `analytics.sales`, the catalog the environment runs on | the scheduled job or the deploy of the main branch |
 | `ci` | `analytics_ci.<ci_schema>`, a catalog for pull requests | the CI job of each pull request |
 
-The names are examples. The base target can also be prod, when CI defers to prod's manifest. hodor needs nothing from the base target but the `--state` manifest that dbt reads anyway.
+The names are examples. The base target can also be a target of another environment, when CI defers to that environment's manifest. For `--defer` and `state:` with `--state`, hodor needs nothing from the base target but the `--state` manifest that dbt reads anyway.
 
 ## Environment names are not code
 
@@ -42,6 +42,16 @@ A base view's code comes from its compiled SQL in the `--state` manifest, so a v
 ## dbt clone
 
 `dbt clone --state <base manifest>` copies base tables into the CI schema (a shallow clone on Databricks). hodor does not take part in `dbt clone`: a cloned table has no hodor record, so when a later `dbt build` selects it, it builds once (`no_history`). From then on the CI record is its history, and the next push reuses it as long as nothing changed.
+
+## Without a `--state` manifest
+
+When the CI target names a base target (`defer_to_target`, see [Configuration](configuration.md)) whose records are in the same state store, hodor can do the manifest's three jobs from those records. On dbt-core this applies when `--state` is not given:
+
+- `state:modified`, `state:new` and the other `state:` selectors compare with the base target's latest records. A selector that cannot be compared fails the run.
+- `--defer` points unselected nodes at the relations the base target's builds wrote.
+- A node that would build can be cloned from the base target when its code, config and parents' data versions equal the base build's, and the base table was not written since. The clone is the whole job (`cloned_from_base`). On an incremental node with `pre_clone: true`, whose code changed, hodor clones and then runs the model on top.
+
+The base target is "whatever the pull request is compared with", in the same environment or another one. The limits are in [Decision rules](how-it-works/decision-rules.md#state-selection): one base target per selection, no defer for a parent the base target never built, no clone for a child of a parent read through defer, and clones run again on every run of the same target. The same functions on dbt v2 are described in [dbt v2](dbt-v2.md).
 
 ## Where CI records go
 

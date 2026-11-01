@@ -22,4 +22,6 @@ Warehouse stores write through dbt's own adapter connection, so they need no ext
 | [`duckdb`](duckdb.md) | any supported adapter | `dbt-hodor[duckdb]` |
 | [`postgres`](postgres.md) (alias `lakebase`) | any supported adapter | `dbt-hodor[postgres]`, or `dbt-hodor[lakebase]` for Lakebase |
 
+`dbt-hodor serve` for dbt v2 opens only `duckdb` or `postgres`: the server has no dbt connection. See [dbt v2](../dbt-v2.md).
+
 The record columns and `dbt-hodor prune` are described in [Records and retention](records.md).

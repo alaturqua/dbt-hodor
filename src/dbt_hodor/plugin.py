@@ -17,7 +17,8 @@
 # the plugin entry point: no gRPC, auth, telemetry, git selector, deferral or clone
 # patches; only run, build, test, seed and snapshot are patched; hodor settings and
 # dbt_state guard. The upstream-derived config merge lives in state_config.py.
-"""dbt plugin entry point: install hodor's patches for run, build, test, seed and snapshot."""
+"""dbt plugin entry point: install hodor's patches for run, build, test, seed and snapshot,
+and its `state:` selector patch for every command."""
 
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ from collections.abc import Callable
 from typing import Any
 
 from dbt.flags import get_flags
+from dbt.graph.selector_methods import StateSelectorMethod
 from dbt.plugins import dbtPlugin
 from dbt.task.run import ModelRunner
 from dbt.task.runnable import GraphRunnableTask
@@ -45,6 +47,8 @@ ORIGINALS: dict[str, Callable[..., Any]] = {
     "TestRunner.execute": TestRunner.execute,
     "TestRunner.print_result_line": TestRunner.print_result_line,
     "GraphRunnableTask.execute_with_hooks": GraphRunnableTask.execute_with_hooks,
+    "StateSelectorMethod.search": StateSelectorMethod.search,
+    "GraphRunnableTask._get_deferred_manifest": GraphRunnableTask._get_deferred_manifest,
 }
 ENABLED_FOR_COMMANDS = ("run", "build", "test", "seed", "snapshot")
 
@@ -61,6 +65,15 @@ def install_patches() -> None:
     GraphRunnableTask.execute_with_hooks = patches.execute_with_hooks  # type: ignore[method-assign]
 
 
+def install_selection_patch() -> None:
+    """`state:` selectors and --defer without --state, for every command that selects (ls and
+    compile too)."""
+    from dbt_hodor import patches
+
+    StateSelectorMethod.search = patches.state_search  # type: ignore[method-assign]
+    GraphRunnableTask._get_deferred_manifest = patches.get_deferred_manifest  # type: ignore[method-assign]
+
+
 def remove_patches() -> None:
     ModelRunner.execute = ORIGINALS["ModelRunner.execute"]  # type: ignore[method-assign]
     ModelRunner.print_result_line = ORIGINALS["ModelRunner.print_result_line"]  # type: ignore[method-assign]
@@ -69,6 +82,8 @@ def remove_patches() -> None:
     TestRunner.execute = ORIGINALS["TestRunner.execute"]  # type: ignore[method-assign]
     TestRunner.print_result_line = ORIGINALS["TestRunner.print_result_line"]  # type: ignore[method-assign]
     GraphRunnableTask.execute_with_hooks = ORIGINALS["GraphRunnableTask.execute_with_hooks"]  # type: ignore[method-assign]
+    StateSelectorMethod.search = ORIGINALS["StateSelectorMethod.search"]  # type: ignore[method-assign]
+    GraphRunnableTask._get_deferred_manifest = ORIGINALS["GraphRunnableTask._get_deferred_manifest"]  # type: ignore[method-assign]
 
 
 class HodorPlugin(dbtPlugin):
@@ -89,8 +104,10 @@ class HodorPlugin(dbtPlugin):
         command = getattr(get_flags(), "WHICH", None)
         if command not in ENABLED_FOR_COMMANDS:
             remove_patches()
+            install_selection_patch()
             return
         install_patches()
+        install_selection_patch()
         from dbt_hodor import __version__
 
         info(f"dbt-hodor {__version__} is enabled for dbt {command}")

@@ -17,6 +17,8 @@ _OWN_DATA_KINDS = ("table", "incremental", "seed", "snapshot")
 VOLATILE_PREFIX = "volatile:"
 # Upstream groups for the code of the views a node reads through: {code:<unique_id>: code hash}.
 CODE_PREFIX = "code:"
+# dbt v2 timestamps are whole seconds: an upstream this close to the last build may be unread.
+SAME_SECOND_MS = 1000
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,8 @@ class NodeFacts:
     # One group per direct parent, external input or volatile value: {table: version},
     # or None when unknown.
     upstream_groups: Mapping[str, Mapping[str, DataVersion] | None] = field(default_factory=dict)
+    # True when data version tokens are integer epoch milliseconds (dbt v2), not Delta versions.
+    epoch_versions: bool = False
 
 
 def _code_changed(facts: NodeFacts, last: Record, cfg: NodeStateConfig) -> bool:
@@ -53,6 +57,35 @@ def _code_changed(facts: NodeFacts, last: Record, cfg: NodeStateConfig) -> bool:
 
 def _group_changed(group: Mapping[str, DataVersion], last: Record) -> bool:
     return any(version.token != last.upstreams.get(table) for table, version in group.items())
+
+
+def _same_second_read(facts: NodeFacts, last: Record) -> str | None:
+    """Reason when an upstream may hold a write the last build did not read: its version is
+    within a second of the last build's target version, or it is unchanged since that build
+    and no more than a second older than the build's start (`built_at_ms`). A table written
+    again in the second its version names keeps that version."""
+    tables = [
+        (table, v.token)
+        for k, g in facts.upstream_groups.items()
+        if not k.startswith(CODE_PREFIX) and not _volatile(k)
+        for table, v in (g or {}).items()
+    ]
+    if not tables:
+        return None
+    tokens = [t for _, t in tables]
+    values = [last.data_version, *tokens]
+    if not all(v is not None and v.isascii() and v.isdigit() for v in values):
+        return "unknown_upstream"
+    built = int(values[0])  # type: ignore[arg-type]
+    if any(abs(int(t) - built) < SAME_SECOND_MS for t in tokens):
+        return "same_second_read"
+    started = last.built_at_ms
+    if started is not None and any(
+        t == last.upstreams.get(table) and int(t) >= started - SAME_SECOND_MS  # type: ignore[arg-type]
+        for table, t in tables
+    ):
+        return "same_second_read"
+    return None
 
 
 def decide(facts: NodeFacts, last: Record | None, cfg: NodeStateConfig, now_ms: int) -> Decision:
@@ -85,6 +118,8 @@ def decide(facts: NodeFacts, last: Record | None, cfg: NodeStateConfig, now_ms: 
     # a view in between changed its SQL: the rows this node reads changed, whatever their data
     if any(_group_changed(g, last) for k, g in groups.items() if k.startswith(CODE_PREFIX)):  # type: ignore[arg-type]
         return Decision(BUILD, "upstream_code_changed")
+    if facts.epoch_versions and (reason := _same_second_read(facts, last)):
+        return Decision(BUILD, reason)
     data = {k: g for k, g in groups.items() if not k.startswith(CODE_PREFIX)}
     changed = [_group_changed(g, last) for k, g in data.items() if not _volatile(k)]  # type: ignore[arg-type]
     if cfg.require_fresh_data_from == "all":

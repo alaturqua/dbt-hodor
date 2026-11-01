@@ -51,6 +51,7 @@ def _open_store(
     from dbt.config.runtime import RuntimeConfig, load_profile, load_project
     from dbt.flags import get_flags, set_from_args
     from dbt.mp_context import get_mp_context
+    from dbt_common.context import set_invocation_context
 
     from dbt_hodor.config import load_settings
     from dbt_hodor.runtime import _profile_settings, open_store
@@ -59,6 +60,7 @@ def _open_store(
     # unset options keep dbt's defaults and DBT_PROJECT_DIR, DBT_PROFILES_DIR, DBT_TARGET
     given = {k: getattr(args, k) for k in ("project_dir", "profiles_dir", "profile", "target")}
     set_from_args(argparse.Namespace(**{k: v for k, v in given.items() if v}), None)
+    set_invocation_context(os.environ)  # env_var() in profiles.yml renders only inside one
     flags = get_flags()
     profile = load_profile(str(flags.PROJECT_DIR), {}, flags.PROFILE, flags.TARGET, None)
     project = load_project(str(flags.PROJECT_DIR), False, profile, {}, require_vars=False)
@@ -144,6 +146,127 @@ def _prune(args: argparse.Namespace) -> str:
     return f"Deleted {count} records: {where}."
 
 
+def _project_identity(project_dir: str) -> tuple[str, str | None]:
+    """`name` and `dbt-cloud.project-id` of the project's dbt_project.yml."""
+    import yaml
+
+    path = os.path.join(project_dir, "dbt_project.yml")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise SystemExit(f"dbt-hodor serve: cannot read {path}: {exc}") from exc
+    name = data.get("name") if isinstance(data, dict) else None
+    if not name:
+        raise SystemExit(f"dbt-hodor serve: {path} has no name")
+    cloud = data.get("dbt-cloud") or {}
+    project_id = cloud.get("project-id") if isinstance(cloud, dict) else None
+    return str(name), None if project_id is None else str(project_id)
+
+
+def _server_store(settings: Any, project_dir: str) -> Any:
+    """The duckdb or postgres store, opened as a dbt run opens it (the server has no dbt-core
+    profile, so settings come from flags and HODOR_* env vars)."""
+    if settings.store == "duckdb":
+        from dbt_hodor.store.duckdb import DuckDBStore
+
+        path = settings.path
+        if path != ":memory:" and not os.path.isabs(path):
+            path = os.path.join(project_dir, path)
+        return DuckDBStore(path, settings.schema or "main", settings.table)
+    from dbt_hodor.store.postgres import PostgresStore, lakebase_target
+
+    host, user, credential = settings.host, settings.user, None
+    if settings.endpoint:  # Lakebase: the endpoint supplies host, user and the token
+        host, user, credential = lakebase_target(settings.endpoint)
+    if credential is None:
+        password = settings.password or ""
+        credential = lambda: password  # noqa: E731 - a plain Postgres password
+    return PostgresStore(
+        settings.database,
+        settings.schema,
+        settings.table,
+        host,
+        settings.port,
+        user or "",
+        credential,
+        settings.sslmode,
+    )
+
+
+def _wait_for_interrupt(server: Any) -> None:
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+
+
+def _serve_clones(args: argparse.Namespace) -> bool:
+    """v2 clones are off unless `--allow-clones` or HODOR_ALLOW_CLONES=true: a dbt v2 shallow
+    clone of an auto-clustered Databricks table makes the next rebuild of it fail."""
+    from dbt_hodor.config import _parse_bool
+
+    if args.allow_clones:
+        return True
+    value = os.environ.get("HODOR_ALLOW_CLONES")
+    if not value:
+        return False
+    try:
+        return _parse_bool(value)
+    except ValueError:
+        print(
+            f"dbt-hodor: invalid HODOR_ALLOW_CLONES {value!r}; expected true or false, "
+            "clones stay off",
+            file=sys.stderr,
+        )
+        return False
+
+
+def _serve(args: argparse.Namespace) -> int:
+    import importlib.util
+
+    from dbt_hodor.config import load_settings
+
+    if importlib.util.find_spec("grpc") is None:
+        print("dbt-hodor serve needs the v2 extra: pip install 'dbt-hodor[v2]'", file=sys.stderr)
+        return 2
+    from dbt_hodor.v2.server import StateServer
+
+    project_dir = args.project_dir or os.environ.get("DBT_PROJECT_DIR") or "."
+    project_name, project_id = _project_identity(project_dir)
+    # flags win over HODOR_* env vars; the server always decides (no shadow mode)
+    raw = {"hodor_store": args.store or "duckdb", "hodor_mode": "on"}
+    environ = {k: v for k, v in os.environ.items() if k != "HODOR_MODE"}
+    if args.store:
+        environ.pop("HODOR_STORE", None)
+    if args.path:
+        raw["hodor_path"] = args.path
+        environ.pop("HODOR_PATH", None)
+    settings = load_settings(raw, environ, lambda m: print(f"dbt-hodor: {m}", file=sys.stderr))
+    if settings.store not in ("duckdb", "postgres") or settings.mode == "off":
+        raise SystemExit(
+            "dbt-hodor serve: the store must be duckdb, or postgres with HODOR_DATABASE, "
+            "HODOR_SCHEMA and HODOR_HOST or HODOR_ENDPOINT"
+        )
+    server = StateServer(
+        lambda: _server_store(settings, project_dir),
+        project_name,
+        project_id,
+        args.port,
+        settings.lookback_days,
+        allow_clones=_serve_clones(args),
+    )
+    port = server.start()
+    try:
+        print("DBT_ENGINE_MANAGE_STATE=true")
+        print(f"RUN_CACHE_API_URL=127.0.0.1:{port}", flush=True)
+        _wait_for_interrupt(server)
+    finally:
+        server.stop()
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dbt-hodor")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -197,7 +320,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     prune.add_argument("--profiles-dir")
     prune.add_argument("--profile")
     prune.add_argument("-t", "--target")
+    serve = commands.add_parser(
+        "serve", help="run the local state server for dbt v2 (needs the v2 extra)"
+    )
+    serve.add_argument("--project-dir", help="the dbt project (default: DBT_PROJECT_DIR or .)")
+    serve.add_argument("--port", type=int, default=50051, help="port on 127.0.0.1 (0: any)")
+    serve.add_argument(
+        "--store",
+        choices=("duckdb", "postgres"),
+        help="default: HODOR_STORE or duckdb; postgres reads HODOR_* env vars",
+    )
+    serve.add_argument("--path", help="duckdb file (default: .hodor/state.duckdb in the project)")
+    serve.add_argument(
+        "--allow-clones",
+        action="store_true",
+        help="clone unchanged tables from the base target (default: HODOR_ALLOW_CLONES or off)",
+    )
     args = parser.parse_args(argv)
+    if args.command == "serve":
+        return _serve(args)
     handlers = {"explain": _explain, "prune": _prune, "ddl": _ddl}
     print(handlers[args.command](args))
     return 0

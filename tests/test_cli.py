@@ -8,6 +8,7 @@ def test_ddl_delta(capsys):
     out = capsys.readouterr().out
     assert out.startswith("CREATE TABLE IF NOT EXISTS `my_catalog`.`ops`.`hodor_state` (")
     assert out.rstrip().endswith("CLUSTER BY (target_name, node_key);")
+    assert "node_hashes STRING" in out
 
 
 def test_ddl_duckdb_defaults_to_main(capsys):
@@ -49,3 +50,34 @@ def test_ddl_trino(capsys):
     assert "record_id varchar" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         main(["ddl", "--store", "trino", "--schema", "ops"])
+
+
+def test_explain_renders_env_var_in_a_new_process(tmp_path):
+    # dbt renders env_var only inside an invocation context: a fresh `dbt-hodor explain`
+    # process has none unless the CLI sets one
+    import os
+    import subprocess
+    import sys
+
+    pytest.importorskip("dbt.adapters.duckdb")
+    from dbt_hodor.store.duckdb import DuckDBStore
+
+    DuckDBStore(str(tmp_path / "state.duckdb")).close()
+    (tmp_path / "dbt_project.yml").write_text('name: p\nversion: "1.0"\nprofile: p\n')
+    (tmp_path / "profiles.yml").write_text(
+        "p:\n  target: dev\n  outputs:\n    dev:\n      type: duckdb\n"
+        "      path: \"{{ env_var('CLI_WH') }}\"\n      hodor_store: duckdb\n"
+        "      hodor_path: \"{{ env_var('CLI_STATE') }}\"\n"
+    )
+    env = dict(
+        os.environ,
+        CLI_WH=str(tmp_path / "wh.duckdb"),
+        CLI_STATE=str(tmp_path / "state.duckdb"),
+    )
+    code = "import sys; from dbt_hodor.cli import main; sys.exit(main(sys.argv[1:]))"
+    args = ["explain", "--project-dir", str(tmp_path), "--profiles-dir", str(tmp_path)]
+    proc = subprocess.run(
+        [sys.executable, "-c", code, *args], env=env, capture_output=True, text=True, timeout=120
+    )
+    # rendered: the store at CLI_STATE opens, and holds no records yet
+    assert "no records for p/dev" in proc.stderr, proc.stderr[-1500:]

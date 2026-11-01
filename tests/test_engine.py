@@ -181,3 +181,103 @@ def test_a_changed_view_in_between_builds_whatever_the_data_and_tolerance(record
     changed = facts(upstream_groups={**UNCHANGED, **edited})
     lenient = NodeStateConfig(require_fresh_data_from="all", lag_tolerance_s=10**9)
     assert decide(changed, rec, lenient, NOW) == Decision(BUILD, "upstream_code_changed")
+
+
+EPOCH_LAST = {
+    "built_at_ms": 1793483538600,
+    "data_version": "1793483539000",
+    "upstreams": {"c.raw.orders": "1793483538500", "c.s.dim": "12"},
+}
+
+
+def epoch_facts(orders, **overrides):
+    base = {
+        "epoch_versions": True,
+        "target_data_version": DataVersion("1793483539000"),
+        "upstream_groups": {
+            "model.p.stg": {"c.raw.orders": DataVersion(orders)},
+            "model.p.dim": {"c.s.dim": DataVersion("12")},
+        },
+    }
+    return facts(**{**base, **overrides})
+
+
+# (last build's start, last build's version, orders token then, orders token now, now, expected)
+# epochs are whole seconds: an upstream token unchanged since the last build, written in the
+# same second the build started or later, may have been written again after the build read it
+B = 1_793_483_530_000  # a build that started at B and wrote its table at B + 9 s
+LAG = NodeStateConfig(lag_tolerance_s=2700)
+
+
+@pytest.mark.parametrize(
+    ("started", "version", "then", "now_token", "now", "expected"),
+    [
+        # beside the build's own version: the old rule
+        (B + 8_600, B + 9_000, B + 8_500, B + 8_500, NOW, (BUILD, "same_second_read")),
+        # written during a long build, after it started
+        (B, B + 9_000, B + 5_000, B + 5_000, NOW, (BUILD, "same_second_read")),
+        # one second before the start: may still be in the same second
+        (B, B + 9_000, B - 1_000, B - 1_000, NOW, (BUILD, "same_second_read")),
+        # more than a second before the start: read before any later write
+        (B, B + 9_000, B - 1_001, B - 1_001, NOW, (REUSE, "no_new_data")),
+        # no start time: only the build's own version counts
+        (None, B + 9_000, B + 5_000, B + 5_000, NOW, (REUSE, "no_new_data")),
+        # a changed token is new data, and the lag tolerance still applies to it
+        (B, B + 9_000, B + 5_000, B + 6_000, B + 60_000, (REUSE, "within_lag_tolerance")),
+    ],
+)
+def test_same_second_read_against_the_build_start(
+    record, started, version, then, now_token, now, expected
+):
+    last = record(
+        built_at_ms=started,
+        data_version=str(version),
+        upstreams={"c.raw.orders": str(then), "c.s.dim": "12"},
+    )
+    node = epoch_facts(str(now_token), target_data_version=DataVersion(str(version)))
+    assert decide(node, last, LAG, now) == Decision(*expected)
+
+
+def test_same_second_read_builds_when_an_upstream_landed_beside_the_last_build(record):
+    last = record(**EPOCH_LAST)
+    node = epoch_facts("1793483538500")
+    assert decide(node, last, CFG, NOW) == Decision(BUILD, "same_second_read")
+
+
+def test_same_second_read_is_off_for_v1_versions(record):
+    # same tokens, epoch_versions False: Delta versions are not times
+    last = record(**EPOCH_LAST)
+    node = replace(epoch_facts("1793483538500"), epoch_versions=False)
+    assert decide(node, last, CFG, NOW) == Decision(REUSE, "no_new_data")
+
+
+def test_an_upstream_two_seconds_before_the_build_reuses(record):
+    last = record(
+        built_at_ms=1793483538100,
+        data_version="1793483539000",
+        upstreams={"c.raw.orders": "1793483537000", "c.s.dim": "12"},
+    )
+    node = epoch_facts("1793483537000")
+    assert decide(node, last, CFG, NOW) == Decision(REUSE, "no_new_data")
+
+
+def test_an_upstream_exactly_one_second_away_does_not_count_as_the_same_second(record):
+    last = record(
+        built_at_ms=1793483539100,  # started in the second its table was written
+        data_version="1793483539000",
+        upstreams={"c.raw.orders": "1793483538000", "c.s.dim": "12"},
+    )
+    node = epoch_facts("1793483538000")
+    assert decide(node, last, CFG, NOW) == Decision(REUSE, "no_new_data")
+
+
+def test_epoch_versions_with_a_non_integer_token_builds(record):
+    last = record(**EPOCH_LAST)
+    node = epoch_facts("not-a-number")
+    assert decide(node, last, CFG, NOW) == Decision(BUILD, "unknown_upstream")
+
+
+def test_epoch_versions_with_a_non_integer_last_data_version_builds(record):
+    last = record(**{**EPOCH_LAST, "data_version": "abc"})
+    node = epoch_facts("1793483538500", target_data_version=DataVersion("abc"))
+    assert decide(node, last, CFG, NOW) == Decision(BUILD, "unknown_upstream")

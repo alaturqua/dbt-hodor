@@ -33,6 +33,7 @@ COLUMNS: tuple[tuple[str, str], ...] = (
     ("upstreams", "text"),
     ("test_result", "text"),
     ("hodor_version", "text"),
+    ("node_hashes", "text"),
 )
 COLUMN_NAMES = tuple(name for name, _ in COLUMNS)
 TYPE_NAMES = {
@@ -42,9 +43,11 @@ TYPE_NAMES = {
     "trino": {"text": "varchar", "bigint": "bigint"},
 }
 SUCCESS_STATUSES = ("success", "pass", "warn", "fail")
+# status of a model's reuse record (dbt-core's RunStatus.Reused); state selection counts it
+REUSED = "reused"
 # action of a copy of the last build, written when a long-reused node nears the lookback limit
 CARRY = "carry"
-_JSON_FIELDS = ("sql_facts", "upstreams", "test_result")
+_JSON_FIELDS = ("sql_facts", "upstreams", "test_result", "node_hashes")
 _MS_FIELDS = ("recorded_at_ms", "data_changed_at_ms", "built_at_ms")
 
 
@@ -81,6 +84,8 @@ class Record:
     upstreams: Mapping[str, str | None] = field(default_factory=dict)  # {table: data_version}
     test_result: Mapping[str, object] | None = None
     hodor_version: str | None = None
+    # engine ("v1"/"v2"), exact relation name, and the state: selector hashes
+    node_hashes: Mapping[str, object] | None = None
 
     def to_row(self) -> tuple[object, ...]:
         """Values in COLUMNS order, JSON fields serialized with sorted keys."""
@@ -110,8 +115,37 @@ def create_table_sql(table: str, dialect: str) -> str:
     return f"CREATE TABLE IF NOT EXISTS {table} (\n  {columns}\n){cluster}"
 
 
+def add_column_sql(table: str, dialect: str) -> str:
+    """Add `node_hashes` to a table made before that column existed."""
+    return f"ALTER TABLE {table} ADD COLUMN node_hashes {TYPE_NAMES[dialect]['text']}"
+
+
+def select_columns(has_hashes: bool = True) -> str:
+    """The column list of a read. A table without `node_hashes` (read-only open of an old
+    table) yields NULL for it."""
+    return ", ".join(
+        name if has_hashes or name != "node_hashes" else "NULL AS node_hashes"
+        for name in COLUMN_NAMES
+    )
+
+
+def _latest_sql(table: str, where: str, has_hashes: bool) -> str:
+    cols = select_columns(has_hashes)
+    return (
+        f"SELECT {', '.join(COLUMN_NAMES)} FROM (SELECT {cols}, ROW_NUMBER() OVER ("
+        "PARTITION BY node_key ORDER BY recorded_at_ms DESC, record_id DESC) AS hodor_rn "
+        f"FROM {table} WHERE {where}"
+        ") latest WHERE hodor_rn = 1"
+    )
+
+
 def latest_builds_sql(
-    table: str, project: str, target: str, since: str, before: str | None = None
+    table: str,
+    project: str,
+    target: str,
+    since: str,
+    before: str | None = None,
+    has_hashes: bool = True,
 ) -> str:
     """Latest successful build (or carried copy of one) per node_key. ROW_NUMBER, not
     QUALIFY: Postgres has none.
@@ -119,17 +153,36 @@ def latest_builds_sql(
     project, target, since and before are placeholders or literals the store has already made
     safe.
     """
-    cols = ", ".join(COLUMN_NAMES)
     statuses = ", ".join(f"'{s}'" for s in SUCCESS_STATUSES)
     until = f" AND recorded_at_ms < {before}" if before is not None else ""
-    return (
-        f"SELECT {cols} FROM (SELECT {cols}, ROW_NUMBER() OVER ("
-        "PARTITION BY node_key ORDER BY recorded_at_ms DESC, record_id DESC) AS hodor_rn "
-        f"FROM {table} WHERE project_name = {project} AND target_name = {target} "
+    where = (
+        f"project_name = {project} AND target_name = {target} "
         f"AND recorded_at_ms >= {since}{until} AND action IN ('build', '{CARRY}') "
         f"AND status IN ({statuses})"
-        ") latest WHERE hodor_rn = 1"
     )
+    return _latest_sql(table, where, has_hashes)
+
+
+def latest_records_sql(
+    table: str,
+    project: str,
+    target: str,
+    since: str,
+    has_hashes: bool = True,
+    any_status: bool = False,
+    reused: bool = False,
+) -> str:
+    """Latest successful record of any action (build, carry, clone, a test's reuse) per
+    node_key; of any status too when `any_status`. `reused` adds the reuse records of models
+    (status "reused"), which state selection compares with; defer and clone leave them out.
+
+    project, target and since are placeholders or literals the store has already made safe.
+    """
+    statuses = ", ".join(f"'{s}'" for s in (*SUCCESS_STATUSES, *((REUSED,) if reused else ())))
+    where = f"project_name = {project} AND target_name = {target} AND recorded_at_ms >= {since}" + (
+        "" if any_status else f" AND status IN ({statuses})"
+    )
+    return _latest_sql(table, where, has_hashes)
 
 
 def prune_sql(table: str, project: str, target: str, before: str, delete: bool) -> str:
@@ -144,7 +197,9 @@ def prune_sql(table: str, project: str, target: str, before: str, delete: bool) 
     )
 
 
-def invocation_sql(table: str, project: str, target: str, invocation: str | None) -> str:
+def invocation_sql(
+    table: str, project: str, target: str, invocation: str | None, has_hashes: bool = True
+) -> str:
     """All records of one invocation in record order; the latest invocation when None.
 
     project, target and invocation are placeholders or literals the store has already made safe.
@@ -156,6 +211,6 @@ def invocation_sql(table: str, project: str, target: str, invocation: str | None
             "ORDER BY recorded_at_ms DESC, record_id DESC LIMIT 1)"
         )
     return (
-        f"SELECT {', '.join(COLUMN_NAMES)} FROM {table} WHERE {where} "
+        f"SELECT {select_columns(has_hashes)} FROM {table} WHERE {where} "
         f"AND invocation_id = {invocation} ORDER BY recorded_at_ms, record_id"
     )

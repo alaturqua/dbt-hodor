@@ -26,8 +26,11 @@ snapshots:
 | `compare_unrendered_code` | `false` | `true`: build only when both the rendered and the unrendered code changed |
 | `execute_hooks_on_any_reuse` | `false` | `true`: run pre- and post-hooks on a reused node. `execute_hooks_on_reuse` is also accepted. All hooks are rendered before the first one runs, so a hook cannot query what an earlier hook wrote. |
 | `evaluate_volatile_sql` | auto | Auto: volatile functions such as `current_date()`, `current_user()` and `current_timestamp()` count as an upstream that changes, unless they only fill a stamp column. `true`: stamp columns count too. `false`: they never count (the dbt State default). |
+| `defer_to_target` | none | A target name such as `prod`: the target whose latest records state selection, defer and clone compare with. State selection reads the latest successful record of every node, whatever its action, so a node that was only reused or cloned there still counts. Letters, digits, `_` and `-`. Unset: those features are off. Its records must be in the same state store. |
+| `allow_clones` | `true` | `false`: never clone this node from the base target. An invalid value warns and counts as `false`. Not read on dbt v2, where clones are off unless `dbt-hodor serve --allow-clones`. |
+| `pre_clone` | `false` | `true`: an incremental node whose code changed is cloned from the base target, then runs on top of the clone. Not read on dbt v2, where such a node builds. |
 
-`pre_clone`, `allow_clones` and `defer_to_target` are accepted and ignored, with a warning. Unknown keys are ignored with a warning. An invalid value warns and keeps the default.
+Unknown keys are ignored with a warning. An invalid value warns and keeps the default.
 
 Duration units: `s`, `m`, `h`, `d`, `w` and their long forms (`second`, `minutes`, `hours`, `day`, `weeks`).
 
@@ -63,6 +66,8 @@ Name parts (`hodor_database`, `hodor_schema`, `hodor_table`) may contain letters
 
 An empty environment variable is ignored, so the profile key applies.
 
+`defer_to_target`, `allow_clones` and `pre_clone` can also be keys on the `profiles.yml` target, unprefixed as dbt State documents them. They take the same values as the node configs of the same names, and a node's `state:` key overrides the target's value for that node. They have no environment variable, and `--vars` does not override them. An invalid `defer_to_target` warns and stays unset; an invalid `allow_clones` warns and counts as `false`.
+
 ### Per run: `--vars`
 
 dbt-core 1.12 accepts no new command-line flags from a plugin: it reads the flags before any plugin loads, so `dbt build --no-hodor` fails with `No such option`. Use dbt's own `--vars` instead. Any `hodor_<name>` key in `--vars` overrides the profile key for that run:
@@ -76,7 +81,11 @@ Precedence, highest first: `HODOR_<NAME>` environment variable, `--vars`, profil
 
 YAML reads unquoted `on` and `off` as booleans. hodor accepts both forms for `hodor_mode`.
 
-dbt State's own switches, `--manage-state` and `DBT_ENGINE_MANAGE_STATE`, do not apply. dbt-core 1.12 has neither: the flag fails, and the variable triggers dbt's `environment-variable-namespace-deprecation` warning. On dbt 1.13 and later they turn on dbt Labs' own dbt State.
+dbt State's own switches, `--manage-state` and `DBT_ENGINE_MANAGE_STATE`, do not apply. dbt-core 1.12 has neither: the flag fails, and the variable triggers dbt's `environment-variable-namespace-deprecation` warning. On dbt 1.13 and later they turn on dbt Labs' own dbt State. On dbt v2 they point dbt at `dbt-hodor serve`: see [dbt v2](dbt-v2.md).
+
+### `dbt-hodor serve` (dbt v2)
+
+The state server reads no `profiles.yml`. Its flags and their defaults are in the table under [dbt v2](dbt-v2.md#install-and-start). It reads the store settings and `hodor_lookback_days` as `HODOR_*` environment variables, which a flag overrides. `hodor_mode` is ignored: the server always decides. `defer_to_target`, `allow_clones` and `pre_clone` are not read; the base target is the one dbt names as its defer target. Clones are off unless the server starts with `--allow-clones` or `HODOR_ALLOW_CLONES=true`; an invalid `HODOR_ALLOW_CLONES` value warns and keeps them off. See [dbt v2](dbt-v2.md#clones).
 
 !!! warning "`delta` and `trino` have no default schema"
 

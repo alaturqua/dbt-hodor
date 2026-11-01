@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import os
 import threading
 import time
@@ -12,16 +13,30 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from dbt.adapters.factory import get_adapter
+from dbt.artifacts.resources import DeferRelation, TestConfig
 from dbt.artifacts.schemas.results import RunStatus
 from dbt.artifacts.schemas.run import RunResult
 from dbt.flags import get_flags
+from dbt.node_types import REFABLE_NODE_TYPES
+from dbt_common.contracts.config.base import CompareBehavior
 from dbt_common.events.base_types import EventLevel
 from dbt_common.events.functions import fire_event
 from dbt_common.events.types import Note
+from dbt_common.exceptions import DbtRuntimeError
 from dbt_common.invocation import get_invocation_id
 
 from dbt_hodor import __version__
-from dbt_hodor.config import NodeStateConfig, Settings, load_settings, node_state_config
+from dbt_hodor.clone import CLONED, PRE_CLONED, may_clone, node_upstreams, relation_ids
+from dbt_hodor.config import (
+    WAREHOUSE_STORES,
+    NodeStateConfig,
+    Settings,
+    effective,
+    load_settings,
+    node_state_config,
+)
+from dbt_hodor.defer import deferred_relations, split_relation
 from dbt_hodor.engine import (
     BUILD,
     CODE_PREFIX,
@@ -53,6 +68,7 @@ from dbt_hodor.providers import (
     store_executor,
 )
 from dbt_hodor.records import CARRY, Record
+from dbt_hodor.selection import select
 from dbt_hodor.store import StateStore, StoreError
 
 PROVIDERS = {
@@ -76,6 +92,7 @@ FLUSH_EVERY = 200
 REPLAY_PREFIX = "dbt-hodor: replayed"
 OPAQUE_GROUP = "<opaque inputs>"
 DAY_MS = 86_400_000
+CLONE = "clone"  # action of a record of a table cloned from the base target
 
 
 def info(msg: str) -> None:
@@ -144,6 +161,290 @@ def seed_hash(seed: Any) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# the config keys dbt's TestConfig.same_contents compares; every other test config is ignored
+_TEST_COMPARED_KEYS = (
+    "severity",
+    "where",
+    "limit",
+    "fail_calc",
+    "warn_if",
+    "error_if",
+    "store_failures",
+    "store_failures_as",
+    "sql_header",
+)
+
+
+def _digest(value: object) -> str:
+    text = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _compared_config(node: Any) -> dict[str, object]:
+    """The unrendered config as dbt's `same_config` compares it: without the keys its config
+    class excludes (alias, schema, database, tags, group); a test compares only modifiers."""
+    unrendered = dict(getattr(node, "unrendered_config", None) or {})
+    config = getattr(node, "config", None)
+    if isinstance(config, TestConfig):
+        return {k: unrendered[k] for k in _TEST_COMPARED_KEYS if k in unrendered}
+    get_fields = getattr(type(config), "_get_fields", None)
+    if get_fields is None:
+        return unrendered
+    excluded = {name for fld, name in get_fields() if not CompareBehavior.should_include(fld)}
+    return {k: v for k, v in unrendered.items() if k not in excluded}
+
+
+def _parse_macros(node: Any) -> tuple[str, ...]:
+    return tuple(getattr(getattr(node, "depends_on", None), "macros", None) or ())
+
+
+def _macro_closure(
+    node: Any, manifest: Any, macros: Sequence[str] | None = None
+) -> dict[str, str | None]:
+    """macro_sql of every macro the node calls, directly or through other macros. `macros`:
+    the node's direct macros at parse time, when the node may have been compiled since."""
+    out: dict[str, str | None] = {}
+    stack = list(_parse_macros(node) if macros is None else macros)
+    while stack:
+        macro_id = stack.pop()
+        if str(macro_id) in out:
+            continue
+        macro = manifest.macros.get(macro_id) if macro_id else None
+        out[str(macro_id)] = macro.macro_sql if macro is not None else None
+        if macro is not None:
+            stack.extend(macro.depends_on.macros)
+    return out
+
+
+def v1_node_hashes(
+    node: Any, manifest: Any, macros: Sequence[str] | None = None
+) -> dict[str, object]:
+    """`node_hashes` of a record: what dbt-core's `state:modified` sub-selectors compare,
+    and the relation name as written. State selection hashes parsed nodes; a record hashes
+    a compiled one, so it passes `macros`, the node's macros at parse time: compiling a
+    generic test adds macros to its `depends_on`."""
+    unrendered = getattr(node, "unrendered_config", None) or {}
+    checksum = getattr(node, "checksum", None)
+    contract = getattr(node, "contract", None)
+    persist = getattr(getattr(node, "config", None), "persist_docs", None) or {}
+    persisted: dict[str, object] = {}
+    if persist.get("relation"):
+        persisted["relation"] = getattr(node, "description", None)
+    if persist.get("columns"):
+        columns = getattr(node, "columns", None) or {}
+        persisted["columns"] = {name: col.description for name, col in columns.items()}
+    enforced = contract is not None and contract.enforced
+    return {
+        "engine": "v1",
+        "relation": getattr(node, "relation_name", None) or None,
+        "body": checksum.checksum if checksum is not None else None,
+        # dbt's same_fqn and same_ref_representation have no key of their own: they count
+        # as configs, so modified.configs selects them too
+        "configs": _digest(
+            [_compared_config(node)]
+            + [getattr(node, k, None) for k in ("fqn", "latest_version", "access")]
+            + [getattr(node, "deprecation_date", None)]
+        ),
+        "contract": (contract.checksum or "enforced") if enforced else None,
+        "macros": _digest(_macro_closure(node, manifest, macros)),
+        "relation_hash": _digest({k: unrendered.get(k) for k in ("database", "schema", "alias")}),
+        "persisted_descriptions": _digest(persisted) if persisted else None,
+    }
+
+
+def _record_relation(record: Record) -> str | None:
+    hashes = record.node_hashes
+    relation = hashes.get("relation") if isinstance(hashes, Mapping) else None
+    return relation if isinstance(relation, str) and relation else None
+
+
+def _by_unique_id(records: Iterable[Record]) -> dict[str, Record]:
+    """The newest record per unique_id. Records are keyed by relation, which can change."""
+    out: dict[str, Record] = {}
+    for record in records:
+        current = out.get(record.unique_id)
+        if current is None or (current.recorded_at_ms, current.record_id) <= (
+            record.recorded_at_ms,
+            record.record_id,
+        ):
+            out[record.unique_id] = record
+    return out
+
+
+def _node_base(node: Any) -> str | None:
+    """The node's own `state: defer_to_target`, which overrides the target's for that node."""
+    config = getattr(node, "config", None)
+    raw = config.get("state") if hasattr(config, "get") else None
+    return node_state_config(raw if isinstance(raw, Mapping) else None, debug).defer_to_target
+
+
+def _check_base(unique_id: str, node: Any, base: str) -> None:
+    """State selection compares every node with one base target: a node that names another
+    one cannot be answered."""
+    other = _node_base(node)
+    if other is not None and other != base:
+        raise StoreError(
+            f"node {unique_id} sets defer_to_target {other}; state selection uses one base target"
+        )
+
+
+def _base_settings(config: Any) -> Settings:
+    return load_settings(
+        _profile_settings(config),
+        os.environ,
+        lambda m: warn(f"dbt-hodor: {m}"),
+        adapter_type=config.credentials.type,
+    )
+
+
+def _read_base(
+    settings: Settings,
+    config: Any,
+    adapter: Any,
+    base: str,
+    connect: bool = True,
+    any_status: Sequence[bool] = (False,),
+    reused: bool = False,
+) -> list[dict[str, Record]]:
+    """The base target's newest record per unique_id, of any action: one map per entry of
+    `any_status`, successful records only for False. `reused` counts reuse records as
+    successful (state selection). `connect` False when the caller already holds a dbt
+    connection."""
+    store = open_store(settings, config, adapter, read_only=True)
+    try:
+        since = int(time.time() * 1000) - settings.lookback_days * DAY_MS
+
+        def read() -> list[dict[str, Record]]:
+            maps = []
+            for flag in any_status:
+                extra: dict[str, bool] = {"any_status": True} if flag else {}
+                if reused:  # the default read stays as it was
+                    extra["reused"] = True
+                records = store.load_latest(config.project_name, base, since, **extra)
+                maps.append(_by_unique_id(records.values()))
+            return maps
+
+        if connect and settings.store in WAREHOUSE_STORES:  # these read through dbt's connection
+            with adapter.connection_named("hodor"):
+                return read()
+        return read()
+    finally:
+        store.close()
+
+
+def state_selection(
+    config: Any, manifest: Any, criterion: str, nodes: Iterable[tuple[str, Any]]
+) -> frozenset[str] | None:
+    """The ids among `nodes` that match a `state:` criterion against the base target's latest
+    records. None without a base target: dbt-core's own method answers. Anything else that
+    stops the comparison fails the run, as dbt-core does without a comparison manifest."""
+    try:
+        settings = _base_settings(config)
+    except Exception as exc:  # noqa: BLE001 - no known base target: dbt-core answers
+        warn(f"dbt-hodor: cannot read the base target for state selection: {exc}")
+        return None
+    base = settings.defer_to_target
+    if base is None:
+        return None
+    try:
+        if settings.mode == "off":
+            raise StoreError("dbt-hodor is off")
+        current: dict[str, dict[str, object]] = {}
+        for uid, node in nodes:
+            _check_base(uid, node, base)
+            current[uid] = v1_node_hashes(node, manifest)
+        # a node only reused in the base target still counts, with the hashes it ran with
+        (latest,) = _read_base(settings, config, get_adapter(config), base, reused=True)
+        return select(criterion, current, latest, "v1")
+    except Exception as exc:
+        raise DbtRuntimeError(f"dbt-hodor cannot compare with {base}: {exc}") from exc
+
+
+def _defer_relation(config: Any, adapter: Any, node: Any, relation: str) -> DeferRelation | None:
+    """The DeferRelation dbt's merge_from_artifact would build, from the relation a base
+    build wrote. None when the text does not render back to the same relation. A record holds
+    only the relation: config, description, meta and tags come from the current node, not
+    from the base target's, and there is no compiled code."""
+    relation_cls = adapter.Relation
+    parts = split_relation(relation, relation_cls.quote_character)
+    if parts is None or len(parts) not in (2, 3):
+        return None
+    # two parts: the adapter does not render the database, so the node's own one is kept
+    database, schema, alias = parts if len(parts) == 3 else [node.database, *parts]
+    deferred = DeferRelation(
+        database=database,
+        schema=schema,
+        alias=alias,
+        relation_name=relation,
+        resource_type=node.resource_type,
+        name=node.name,
+        description=node.description,
+        compiled_code=None,  # a record holds no code
+        meta=node.meta,
+        tags=node.tags,
+        config=node.config,
+    )
+    if str(relation_cls.create_from(config, deferred)) != relation:
+        return None
+    return deferred
+
+
+def defer_target(config: Any) -> str | None:
+    """The base target name for a warning, or None when it cannot be read."""
+    try:
+        return _base_settings(config).defer_to_target
+    except Exception:  # noqa: BLE001 - only names the target in a message
+        return None
+
+
+def defer_to_base(config: Any, manifest: Any, selected: Iterable[str]) -> bool:
+    """`--defer` without --state: point unselected nodes at the relations the base target's
+    builds wrote. False when hodor does not defer, so dbt-core answers as without hodor. A
+    node is deferred only from a successful base build whose relation renders back exactly."""
+    try:
+        settings = _base_settings(config)
+    except Exception as exc:  # noqa: BLE001 - no known base target: dbt-core answers
+        warn(f"dbt-hodor: cannot read the base target for defer: {exc}")
+        return False
+    base = settings.defer_to_target
+    if base is None or base == config.target_name:
+        return False
+    try:
+        if settings.mode == "off":
+            raise StoreError("dbt-hodor is off")
+        chosen = set(selected)
+        nodes = {
+            uid: node
+            for uid, node in manifest.nodes.items()
+            if uid not in chosen
+            and node.resource_type in REFABLE_NODE_TYPES
+            and not node.is_ephemeral
+            and _node_base(node) in (None, base)  # a node naming another base is not deferred
+        }
+        adapter = get_adapter(config)
+        # dbt's before_run holds a connection; dbt-hodor's run start does not
+        held = adapter.connections.get_if_exists() is not None
+        latest, newest = _read_base(
+            settings, config, adapter, base, connect=not held, any_status=(False, True)
+        )
+        found = deferred_relations(nodes, latest, base, config.target_name, newest)
+        deferred: dict[str, Any] = {}
+        for uid, relation in found.items():
+            target = _defer_relation(config, adapter, nodes[uid], relation)
+            if target is not None:
+                deferred[uid] = dataclasses.replace(nodes[uid], defer_relation=target)
+    except Exception as exc:  # noqa: BLE001 - no hodor defer: dbt-core answers
+        warn(f"dbt-hodor could not defer to {base}: {exc}; dbt fails the run without --state")
+        return False
+    manifest.nodes.update(deferred)  # all or nothing
+    if not latest:
+        warn(f"dbt-hodor found no records for {base} to defer to")
+    elif nodes and not deferred:
+        warn(f"dbt-hodor deferred none of {len(nodes)} unselected nodes to {base}")
+    debug(f"dbt-hodor: deferred {len(deferred)} of {len(nodes)} unselected nodes to {base}")
+    return True
+
+
 def full_refresh(node: Any) -> bool:
     """dbt's rule: the node's full_refresh config, when set, wins over the flag."""
     configured = node.config.get("full_refresh")
@@ -152,16 +453,24 @@ def full_refresh(node: Any) -> bool:
     return bool(getattr(get_flags(), "FULL_REFRESH", False))
 
 
+_BASE_TARGET_KEYS = ("defer_to_target", "allow_clones", "pre_clone")
+
+
 def _profile_settings(config: Any) -> dict[str, object]:
-    """hodor_* keys of the active target. dbt drops unknown keys from credentials, so read
-    profiles.yml again and render the keys the way dbt renders the profile."""
+    """hodor_* keys and the base target keys of the active target. dbt drops unknown keys
+    from credentials, so read profiles.yml again and render the keys the way dbt renders
+    the profile."""
     from dbt.config.profile import read_profile
     from dbt.config.renderer import ProfileRenderer
 
     raw = read_profile(str(get_flags().PROFILES_DIR))
     outputs = (raw.get(config.profile_name) or {}).get("outputs") or {}
     target = outputs.get(config.target_name) or {}
-    keys = {k: v for k, v in target.items() if isinstance(k, str) and k.startswith("hodor_")}
+    keys = {
+        k: v
+        for k, v in target.items()
+        if isinstance(k, str) and (k.startswith("hodor_") or k in _BASE_TARGET_KEYS)
+    }
     rendered: dict[str, object] = ProfileRenderer(config.cli_vars).render_data(keys)
     # `--vars '{hodor_mode: off}'` overrides the profile for one invocation (env vars still win)
     rendered.update(
@@ -254,6 +563,7 @@ class Plan:
     facts: NodeFacts | None = None
     text_hash: str | None = None
     analysis: SqlAnalysis | None = None
+    node_hashes: Mapping[str, object] | None = None  # set by _record, copied by _carry
 
 
 class Runtime:
@@ -278,6 +588,8 @@ class Runtime:
         self.store = store
         self.provider = provider
         self.graph = build_graph(manifest)
+        # the macros of each node before compiling adds any, for the state selection hashes
+        self._parse_macros = {uid: _parse_macros(n) for uid, n in manifest.nodes.items()}
         # --defer: the state manifest names the relations an unselected parent may be read from
         self.state_manifest = state_manifest
         self.state_graph = build_graph(state_manifest) if state_manifest is not None else {}
@@ -296,13 +608,19 @@ class Runtime:
         self._warned: set[str] = set()
         self._macro_cache: dict[str, dict[str, str]] = {}
         self._volatile: dict[str, DataVersion] | None = None
+        self.config = config
+        # base target: (latest build per unique_id, newest record per unique_id, relation ids)
+        self._bases: dict[str, tuple[dict[str, Record], dict[str, Record], dict[str, str]] | None]
+        self._bases = {}
+        self._base_lock = threading.Lock()  # one read per base target, also with many threads
+        self._can_clone_table: bool | None = None
         try:
             from dbt.adapters.factory import get_adapter_package_names
 
             self._internal_packages = frozenset(get_adapter_package_names(self.dialect))
         except Exception:  # noqa: BLE001 - the plugin is loaded in a real run
             self._internal_packages = frozenset({"dbt", f"dbt_{self.dialect}"})
-        self.reused = self.built = self.errors = 0
+        self.reused = self.built = self.cloned = self.errors = 0
         self.finished = False
         self.decisions: dict[str, Decision] = {}  # for the result line
 
@@ -650,6 +968,11 @@ class Runtime:
     def _record(self, node: Any, plan: Plan, action: str, status: str, **extra: Any) -> None:
         facts = plan.facts
         try:
+            macros = self._parse_macros.get(node.unique_id)
+            plan.node_hashes = v1_node_hashes(node, self.manifest, macros)
+        except Exception as exc:  # noqa: BLE001 - a record without hashes counts as modified
+            self.warn_once(f"cannot hash {node.unique_id} for state selection: {exc}")
+        try:
             record = Record(
                 record_id=str(uuid.uuid4()),
                 invocation_id=self.invocation_id,
@@ -672,6 +995,7 @@ class Runtime:
                 sql_facts=plan.analysis.to_json() if plan.analysis else None,
                 upstreams=upstream_versions(facts) if facts else {},
                 hodor_version=__version__,
+                node_hashes=plan.node_hashes,
                 **extra,
             )
         except Exception as exc:  # noqa: BLE001 - a lost record only causes an extra build
@@ -684,12 +1008,19 @@ class Runtime:
 
     def _carry(self, plan: Plan) -> None:
         """After half the lookback window of reuses, copy the last build record forward, so
-        it stays in the window. The copy holds the same facts, so it decides the same."""
+        it stays in the window. The copy holds the same facts, so it decides the same, and
+        the node's current hashes, so state selection compares with the code that ran."""
         last, now = plan.last, self.now_ms()
         if last is None or now - last.recorded_at_ms < self.settings.lookback_days * DAY_MS // 2:
             return
         self._queue(
-            dataclasses.replace(last, record_id=str(uuid.uuid4()), recorded_at_ms=now, action=CARRY)
+            dataclasses.replace(
+                last,
+                record_id=str(uuid.uuid4()),
+                recorded_at_ms=now,
+                action=CARRY,
+                node_hashes=plan.node_hashes,  # None, not stale, when hashing failed
+            )
         )
 
     def _queue(self, record: Record) -> None:
@@ -712,6 +1043,8 @@ class Runtime:
         with self._lock:
             if plan.decision.action == REUSE:
                 self.reused += 1
+            elif plan.decision.reason == CLONED:
+                self.cloned += 1
             else:
                 self.built += 1
 
@@ -793,6 +1126,183 @@ class Runtime:
             self.warn_once(f"cannot read the data version of {model.unique_id}: {exc}")
             return UNKNOWN
 
+    def _base_records(
+        self, base: str
+    ) -> tuple[dict[str, Record], dict[str, Record], dict[str, str]] | None:
+        """The base target's records, read once per run. None when they cannot be read."""
+        with self._base_lock:
+            if base not in self._bases:
+                try:
+                    since = self.now_ms() - self.settings.lookback_days * DAY_MS
+                    builds = _by_unique_id(self.store.load(self.project_name, base, since).values())
+                    newest = _by_unique_id(
+                        self.store.load_latest(
+                            self.project_name, base, since, any_status=True
+                        ).values()
+                    )
+                    # names of the base target from its records, of this target from the graph;
+                    # a name the two give to different nodes maps to none
+                    ids = relation_ids(builds, newest)
+                    clashes = {r for r, uid in self.relations.items() if ids.get(r, uid) != uid}
+                    ids = {r: uid for r, uid in (self.relations | ids).items() if r not in clashes}
+                    self._bases[base] = (builds, newest, ids)
+                except Exception as exc:  # noqa: BLE001 - nothing is cloned from this base
+                    self.warn_once(f"cannot read the records of {base}, nothing is cloned: {exc}")
+                    self._bases[base] = None
+            return self._bases[base]
+
+    def _clone_choice(
+        self, plan: Plan, unique_id: str, relation: str | None, can_clone: Callable[[], bool]
+    ) -> tuple[Decision, Record, str] | None:
+        """(clone decision, base record, base relation) when the node may be cloned from the
+        base target. No store read without a base target, with clones off, in shadow mode or
+        when `can_clone()` (the adapter's can_clone_table) is false."""
+        facts, analysis = plan.facts, plan.analysis
+        if self.settings.mode != "on" or facts is None or analysis is None or relation is None:
+            return None
+        if plan.decision.action != BUILD or facts.kind not in ("table", "incremental"):
+            return None
+        base_cfg = effective(self.settings, plan.cfg)
+        if base_cfg.target in (None, self.target_name) or not base_cfg.allow_clones:
+            return None
+        if not can_clone():
+            return None
+        loaded = self._base_records(base_cfg.target)  # type: ignore[arg-type]
+        if loaded is None:
+            return None
+        builds, newest, ids = loaded
+        base = builds.get(unique_id)
+        source = _record_relation(base) if base is not None else None
+        if base is None or source is None or normalize_relation(source) == relation:
+            return None  # two target names that write to one table: nothing to clone
+        newer = newest.get(unique_id)
+        if newer is not None and newer.record_id != base.record_id:
+            other = _record_relation(newer)
+            if other is None or normalize_relation(other) != normalize_relation(source):
+                return None  # renamed since that build: its table may be an orphan
+        cloned = may_clone(
+            facts,
+            plan.decision,
+            base,
+            base_cfg,
+            node_upstreams(upstream_versions(facts), ids),
+            node_upstreams(base.upstreams, ids),
+            base_is_current=False,
+            volatile_stamps=analysis.volatile_stamps,
+            volatile=analysis.volatile,
+        )
+        return (cloned, base, source) if cloned is not None else None
+
+    def _clone_context(self, runner: Any, model: Any) -> dict[str, Any]:
+        from dbt.context.providers import generate_runtime_model_context
+
+        return generate_runtime_model_context(model, runner.config, self.manifest)
+
+    def _can_clone(self, runner: Any, model: Any) -> bool:
+        """The adapter's can_clone_table, rendered once per run: it takes no node."""
+        with self._lock:
+            known = self._can_clone_table
+        if known is None:
+            known = bool(self._clone_context(runner, model)["can_clone_table"]())
+            with self._lock:
+                self._can_clone_table = known
+        return known
+
+    def _clone(
+        self, runner: Any, model: Any, base: Record, source: str, touched: list[bool]
+    ) -> bool:
+        """Clone the base table into the node's relation with the adapter's macros. False,
+        with nothing written, when the base table changed since its build. Raises when a step
+        fails, also when the base table changed while it was cloned; `touched` holds True
+        once the node's relation may have changed."""
+        base_key = normalize_relation(source)
+        version = self.provider.version(base_key)
+        if version.token is None or version.token != base.data_version:
+            debug(f"dbt-hodor: {source} changed since its build, {model.unique_id} builds")
+            return False
+        adapter = runner.adapter
+        context = self._clone_context(runner, model)
+        parts = split_relation(source, adapter.Relation.quote_character)
+        if parts is None or len(parts) not in (2, 3):
+            return False
+        database, schema, identifier = parts if len(parts) == 3 else [None, *parts]
+        base_relation = adapter.Relation.create(
+            database=database, schema=schema, identifier=identifier, type="table"
+        )
+        this = context["this"].incorporate(type="table")
+        existing = adapter.get_relation(model.database, model.schema, model.alias)
+        sql = str(context["create_or_replace_clone"](this, base_relation))
+        # as dbt's clone materialization: a view, or a table the adapter cannot replace
+        # by a clone in place, is dropped first
+        requires_drop = context.get("clone_requires_drop")
+        if existing is not None and (
+            requires_drop(existing) if requires_drop else not existing.is_table
+        ):
+            touched.append(True)
+            adapter.drop_relation(existing)
+        touched.append(True)  # a failed statement may still have written
+        adapter.cache_added(this)  # so the incremental materialization finds the clone
+        adapter.execute(sql)
+        # a write to the base table between the read above and the clone: the clone may
+        # hold rows of no known version
+        after = self.provider.refresh(base_key)
+        if after.token is None or after.token != base.data_version:
+            raise StoreError(f"{source} changed during the clone")
+        should_revoke = context["should_revoke"](existing, full_refresh_mode=True)
+        context["apply_grants"](this, model.config.get("grants"), should_revoke=should_revoke)
+        context["persist_docs"](this, model)
+        return True
+
+    def _try_clone(
+        self, runner: Any, model: Any, manifest: Any, plan: Plan, relation: str | None
+    ) -> Any:
+        """The node to build after a clone attempt, or None when nothing was written. On a
+        clone the plan's decision changes to it. The node is compiled again whenever its
+        relation changed, so `is_incremental()` sees the relation as it is now."""
+        touched: list[bool] = []
+        try:
+            choice = self._clone_choice(
+                plan, model.unique_id, relation, lambda: self._can_clone(runner, model)
+            )
+            if choice is None:
+                return None
+            decision, base, source = choice
+            if not self._clone(runner, model, base, source, touched):
+                return None
+            if decision.reason == PRE_CLONED:  # the model runs on top of the clone
+                model = runner.compiler.compile_node(model, manifest, {})
+        except Exception as exc:  # noqa: BLE001 - fail open: the node builds as decided
+            self.warn_once(f"cannot clone {model.unique_id}, building it: {exc}")
+            with self._lock:
+                self.errors += 1
+            if not touched:
+                return None
+            return self._undo_clone(runner, model, manifest, plan)
+        plan.decision = decision
+        self.decisions[model.unique_id] = decision
+        return model
+
+    def _undo_clone(self, runner: Any, model: Any, manifest: Any, plan: Plan) -> Any:
+        """After a failed clone the relation may hold part of one: drop it and compile the
+        model again, so the build starts from nothing. A table whose drop fails still builds,
+        as its materialization replaces the relation. An incremental model fails, with an
+        error record: running on top of a partial clone is not safe."""
+        adapter = runner.adapter
+        try:
+            left = adapter.get_relation(model.database, model.schema, model.alias)
+            if left is not None:
+                adapter.drop_relation(left)
+        except Exception as exc:
+            if plan.facts is not None and plan.facts.kind == "table":
+                self.warn_once(f"cannot drop the failed clone of {model.unique_id}: {exc}")
+                return model
+            self._record(model, plan, BUILD, "error", built_at_ms=plan.started_ms)
+            raise DbtRuntimeError(
+                f"dbt-hodor cannot drop the partial clone of {model.unique_id}, so it does not "
+                f"run the model on top of it: {exc}"
+            ) from exc
+        return runner.compiler.compile_node(model, manifest, {})
+
     def execute_model(self, runner: Any, model: Any, manifest: Any, original: Callable) -> Any:
         resource_type = _value(model.resource_type)
         if (
@@ -821,6 +1331,24 @@ class Runtime:
             self._carry(plan)
             self._count(plan)
             return RunResult.from_node(model, RunStatus.Reused, f"REUSED ({plan.decision.reason})")
+        cloned = self._try_clone(runner, model, manifest, plan, relation)
+        if cloned is not None and plan.decision.reason == CLONED:
+            if plan.cfg.execute_hooks_on_reuse:  # a clone runs the hooks as a reuse does
+                for sql in hooks:
+                    runner.adapter.execute(sql, auto_begin=False)
+            self._count(plan)
+            version = self._refresh(model)
+            self._record(
+                model,
+                plan,
+                CLONE,
+                "success",
+                built_at_ms=plan.started_ms,
+                data_version=version.token,
+                data_changed_at_ms=version.changed_at_ms,
+            )
+            return RunResult.from_node(model, RunStatus.Success, f"CLONED ({CLONED})")
+        model = cloned or model
         try:
             result = original(runner, model, manifest)
         except BaseException:
@@ -929,6 +1457,8 @@ class Runtime:
             )
         else:
             summary = f"{self.reused} reused, {self.built} built"
+            if self.cloned:
+                summary += f", {self.cloned} cloned"
         info(f"dbt-hodor: {summary}, {self.errors} fail-open errors")
 
 
@@ -966,7 +1496,9 @@ def start_runtime(task: Any, selected_uids: Any) -> None:
         try:
             state_manifest = task._get_deferred_manifest()
         except Exception as exc:  # noqa: BLE001 - nothing is read from the state
-            warn(f"dbt-hodor: cannot read the --state manifest: {exc}")
+            # without --state, dbt reports the same error itself when it defers
+            given = task.args.state or getattr(task.args, "defer_state", None)
+            (warn if given else debug)(f"dbt-hodor: cannot read the --state manifest: {exc}")
     with adapter.connection_named("hodor"):
         runtime = get_runtime(task.config, adapter, task.manifest, state_manifest)
     if runtime is None:

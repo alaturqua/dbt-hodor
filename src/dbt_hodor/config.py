@@ -27,7 +27,6 @@ _UNIT_SECONDS = {
 }
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([a-zA-Z]+)\s*$")
 
-IGNORED_STATE_KEYS = frozenset({"pre_clone", "allow_clones", "defer_to_target"})
 _HOOK_KEYS = ("execute_hooks_on_any_reuse", "execute_hooks_on_reuse")
 
 MODES = ("off", "shadow", "on")
@@ -103,6 +102,10 @@ class NodeStateConfig:
     execute_hooks_on_reuse: bool = False
     # None (auto): volatile values count unless only in stamp columns. True: all. False: none.
     evaluate_volatile_sql: bool | None = None
+    # Base target keys. None: not set on the node, so the profile target's value applies.
+    defer_to_target: str | None = None
+    allow_clones: bool | None = None
+    pre_clone: bool | None = None
 
 
 def node_state_config(raw: Mapping[str, object] | None, warn: Warn) -> NodeStateConfig:
@@ -124,12 +127,23 @@ def node_state_config(raw: Mapping[str, object] | None, warn: Warn) -> NodeState
                 values["execute_hooks_on_reuse"] = _parse_bool(value)
             elif key == "evaluate_volatile_sql":
                 values["evaluate_volatile_sql"] = _parse_bool(value)
-            elif key in IGNORED_STATE_KEYS:
-                warn(f"state.{key} is not supported in v1 and is ignored")
+            elif key == "defer_to_target":
+                if not isinstance(value, str) or not IDENT_RE.match(value):
+                    raise ValueError(
+                        f"invalid value {value!r}, expected letters, digits, '_' or '-'"
+                    )
+                values["defer_to_target"] = value
+            elif key in ("allow_clones", "pre_clone"):
+                values[key] = _parse_bool(value)
             else:
                 warn(f"unknown state config key {key!r} is ignored")
         except ValueError as exc:
-            warn(f"state.{key}: {exc}; using the default")
+            if key == "allow_clones":
+                # fail safe: an unreadable allow_clones does not clone
+                values["allow_clones"] = False
+                warn(f"state.{key}: {exc}; using False")
+            else:
+                warn(f"state.{key}: {exc}; using the default")
     return NodeStateConfig(**values)  # type: ignore[arg-type]
 
 
@@ -151,6 +165,41 @@ class Settings:
     password: str | None = None
     sslmode: str = "require"
     endpoint: str | None = None
+    # Base target keys, unprefixed as in dbt State. None: no base target, so state selection,
+    # defer and clone stay off.
+    defer_to_target: str | None = None
+    allow_clones: bool = True
+    pre_clone: bool = False
+
+
+@dataclass(frozen=True)
+class BaseTarget:
+    target: str | None
+    allow_clones: bool
+    pre_clone: bool
+
+
+def effective(settings: Settings, cfg: NodeStateConfig) -> BaseTarget:
+    """The base target for one node: its `state:` keys win over the profile target's."""
+
+    def pick(node_value, target_value):
+        return target_value if node_value is None else node_value
+
+    return BaseTarget(
+        target=pick(cfg.defer_to_target, settings.defer_to_target),
+        allow_clones=pick(cfg.allow_clones, settings.allow_clones),
+        pre_clone=pick(cfg.pre_clone, settings.pre_clone),
+    )
+
+
+def _bool_setting(raw: Mapping[str, object], name: str, default: bool, warn: Warn) -> bool:
+    if name not in raw:
+        return default
+    try:
+        return _parse_bool(raw[name])
+    except ValueError:
+        warn(f"invalid {name} {raw[name]!r}; expected true or false, using {default}")
+        return default
 
 
 def _int_setting(
@@ -168,13 +217,16 @@ def _int_setting(
     return default
 
 
-def _ident_setting(raw: Mapping[str, object], name: str, warn: Warn) -> str | None:
+def _ident_setting(
+    raw: Mapping[str, object], name: str, warn: Warn, key: str | None = None
+) -> str | None:
+    """`key` is the name the user wrote, `hodor_<name>` unless given."""
     if name not in raw:
         return None
     value = str(raw[name])
     if IDENT_RE.match(value):
         return value
-    warn(f"invalid hodor_{name} {value!r}; expected letters, digits, '_' or '-'")
+    warn(f"invalid {key or 'hodor_' + name} {value!r}; expected letters, digits, '_' or '-'")
     return None
 
 
@@ -209,6 +261,14 @@ def load_settings(
         value = env_value if env_value else profile_target.get(f"hodor_{name}")
         if value is not None:
             raw[name] = value
+
+    # The base target keys are unprefixed, as dbt State documents them. No env var or --vars.
+    base: dict[str, object] = {
+        k: profile_target[k]
+        for k in ("defer_to_target", "allow_clones", "pre_clone")
+        if profile_target.get(k) is not None
+    }
+    defer_to_target = _ident_setting(base, "defer_to_target", warn, "defer_to_target")
 
     defaults = Settings()
     mode_value = raw.get("mode", defaults.mode)
@@ -264,4 +324,10 @@ def load_settings(
         password=str(raw["password"]) if raw.get("password") else None,
         sslmode=str(raw.get("sslmode", defaults.sslmode)),
         endpoint=endpoint,
+        defer_to_target=defer_to_target,
+        # fail safe: an unreadable allow_clones does not clone
+        allow_clones=_bool_setting(base, "allow_clones", False, warn)
+        if "allow_clones" in base
+        else defaults.allow_clones,
+        pre_clone=_bool_setting(base, "pre_clone", defaults.pre_clone, warn),
     )

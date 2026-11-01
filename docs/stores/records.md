@@ -15,16 +15,17 @@ Portable types only: text and bigint, with JSON stored as text. Times are epoch 
 | `mode` | text | `shadow` or `on` |
 | `decision` | text | what the engine decided: `build` or `reuse` |
 | `reason` | text | [reason code](../how-it-works/decision-rules.md) |
-| `action` | text | what actually happened: `build` or `reuse`. In shadow mode always `build`. `carry` marks a copy of the last build record (see below) |
+| `action` | text | what actually happened: `build` or `reuse`. In shadow mode always `build`. `clone` marks a clone from the base target, on dbt-core and dbt v2. `carry` marks a copy of the last build record (see below). `stale` (dbt v2) marks a copy of a seed's build record written after an outside write to the seed table, so the seed's next run builds |
 | `status` | text | dbt status: success, error, pass, warn, fail (or `reused`) |
 | `text_hash`, `code_hash`, `unrendered_hash`, `config_hash`, `hash_version` | text | [hashing](../how-it-works/hashing.md) |
 | `sql_facts` | text (JSON) | stored SQL analysis for the fast path |
 | `data_version` | text | data version token of the target after the build |
 | `data_changed_at_ms` | bigint | commit time of `data_version`, when known |
-| `built_at_ms` | bigint | start of the build that wrote this record (null for reuse) |
+| `built_at_ms` | bigint | start of the build or clone that wrote this record (null for reuse). A `carry` or `stale` record keeps the value of the build record it copies |
 | `upstreams` | text (JSON) | `{table: data_version}` used for this decision |
 | `test_result` | text (JSON) | status, failures, message (tests only) |
 | `hodor_version` | text | package version |
+| `node_hashes` | text (JSON) | the node's `state:` hashes (`body`, `configs`, `contract`, `macros`, `relation_hash`, `persisted_descriptions`), its relation name as written (`relation`) and the hash engine (`engine`, `v1` or `v2`); null on records written before the column existed |
 
 At run start hodor loads the latest successful `build` record per `node_key`, for the project and target, within `hodor_lookback_days`. Successful means status `success`, `pass`, `warn` or `fail`. Shadow-mode builds count, so shadow mode builds the history that `on` mode needs.
 

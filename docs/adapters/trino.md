@@ -56,10 +56,11 @@ hodor runs `select * from "<catalog>"."<schema>"."<table>$history"` and reads th
 
 A view is hashed from its definition in `<catalog>.information_schema.views`.
 
-Limit: hodor reads the whole `$history` table of each relevant table, not a window of 20 commits. On the Trino adapter the state store can be `trino`, `duckdb` or `postgres`.
+On the Trino adapter the state store can be `trino`, `duckdb` or `postgres`.
 
 ## Limits
 
 - hodor reads the whole `$history` table of each relevant table, not a window of 20 commits.
 - Connectors other than Iceberg and Delta Lake (Hive, memory and the rest) have no `$history` table, so every node that depends on them builds.
 - The Delta Lake connector is covered by unit tests only.
+- No clones from the base target: dbt-trino does not report `can_clone_table`, so a node builds as decided. See [Cloning](../how-it-works/decision-rules.md#cloning-from-the-base-target).

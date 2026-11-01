@@ -2,8 +2,10 @@ import pytest
 
 from dbt_hodor.config import (
     DEFAULT_LAG_TOLERANCE_S,
+    BaseTarget,
     NodeStateConfig,
     Settings,
+    effective,
     load_settings,
     node_state_config,
     parse_duration,
@@ -82,8 +84,58 @@ def test_node_state_config_warns_and_keeps_defaults_for_bad_values():
     )
     assert cfg == NodeStateConfig()
     assert len(warnings) == 4
-    assert any("pre_clone" in w and "not supported" in w for w in warnings)
+    assert any("pre_clone" in w and "invalid boolean" in w for w in warnings)
     assert any("colour" in w for w in warnings)
+
+
+def test_node_state_config_reads_the_base_target_keys():
+    cfg = node_state_config(
+        {"defer_to_target": "prod", "allow_clones": "false", "pre_clone": True},
+        warn=pytest.fail,
+    )
+    assert cfg.defer_to_target == "prod"
+    assert cfg.allow_clones is False
+    assert cfg.pre_clone is True
+    assert NodeStateConfig().defer_to_target is None
+
+
+def test_base_target_keys_on_the_profile_target():
+    settings = load_settings(
+        {"defer_to_target": "prod", "allow_clones": "false", "pre_clone": "true"},
+        {},
+        lambda _: None,
+    )
+    assert settings.defer_to_target == "prod"
+    assert settings.allow_clones is False
+    assert settings.pre_clone is True
+    defaults = load_settings({}, {}, lambda _: None)
+    assert (defaults.defer_to_target, defaults.allow_clones, defaults.pre_clone) == (
+        None,
+        True,
+        False,
+    )
+
+
+def test_node_state_keys_override_the_target():
+    settings = Settings(defer_to_target="prod", allow_clones=False, pre_clone=False)
+    cfg = NodeStateConfig(defer_to_target="qa", allow_clones=True, pre_clone=True)
+    assert effective(settings, cfg) == BaseTarget(target="qa", allow_clones=True, pre_clone=True)
+    assert effective(settings, NodeStateConfig()) == BaseTarget("prod", False, False)
+
+
+def test_unset_base_target_turns_the_features_off():
+    assert effective(Settings(), NodeStateConfig()).target is None
+
+
+@pytest.mark.parametrize("where", ["profile", "state"])
+def test_invalid_defer_to_target_warns_and_is_unset(where):
+    warnings = []
+    if where == "profile":
+        value = load_settings({"defer_to_target": "pr od"}, {}, warnings.append).defer_to_target
+    else:
+        value = node_state_config({"defer_to_target": "pr od"}, warnings.append).defer_to_target
+    assert value is None
+    assert any("defer_to_target" in w for w in warnings)
 
 
 def test_delta_without_schema_turns_off():
@@ -260,3 +312,23 @@ def test_trino_store_uses_the_target_catalog_and_needs_a_schema():
     profile = {"database": "iceberg", "hodor_schema": "ops", "hodor_database": "state"}
     settings = load_settings(profile, {}, pytest.fail, adapter_type="trino")
     assert (settings.database, settings.schema) == ("state", "ops")
+
+
+def test_invalid_defer_to_target_warning_names_the_unprefixed_key():
+    warnings = []
+    load_settings({"defer_to_target": "pr od"}, {}, warnings.append)
+    assert warnings and all("hodor_defer_to_target" not in w for w in warnings)
+    assert any("invalid defer_to_target 'pr od'" in w for w in warnings)
+
+
+@pytest.mark.parametrize("where", ["profile", "state"])
+def test_invalid_allow_clones_turns_clones_off(where):
+    warnings = []
+    if where == "profile":
+        settings = load_settings({"allow_clones": "sometimes"}, {}, warnings.append)
+        cfg = NodeStateConfig()
+    else:
+        settings = Settings()
+        cfg = node_state_config({"allow_clones": "sometimes"}, warnings.append)
+    assert effective(settings, cfg).allow_clones is False
+    assert any("allow_clones" in w and "False" in w for w in warnings)

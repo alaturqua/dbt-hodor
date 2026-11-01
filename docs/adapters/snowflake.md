@@ -63,6 +63,10 @@ A plain read moves nothing. The live lifecycle test also builds with dbt through
 - **Not supported:** stages and `@stage` reads are untraceable inputs, so the node builds. The `dynamic_table` materialization is unsupported, so those models always build.
 - **State store:** on the `snowflake` adapter the state store can be `duckdb` or `postgres`. The default, `delta`, turns hodor off. The live tests use `duckdb`; the `postgres` store uses its own connection and was not run together with Snowflake.
 
+## Clones and dbt v2
+
+Clones and `state:` selection have not been tested on Snowflake. On dbt v2 (`snowflake` dialect) the server answers a clone with `CREATE OR REPLACE TABLE ... CLONE`, which is covered by unit tests only. dbt v2 sends epoch timestamps instead of the token above: see [dbt v2](../dbt-v2.md).
+
 ## Limits
 
 - A `COMMENT` and a 0-row update move the token, so they cause an extra build, never a wrong reuse.

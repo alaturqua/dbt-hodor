@@ -1,4 +1,11 @@
-from dbt_hodor.records import COLUMN_NAMES, Record, create_table_sql, latest_builds_sql
+from dbt_hodor.records import (
+    COLUMN_NAMES,
+    Record,
+    add_column_sql,
+    create_table_sql,
+    latest_builds_sql,
+    latest_records_sql,
+)
 
 
 def test_row_round_trip(record):
@@ -40,3 +47,48 @@ def test_create_table_sql_for_trino():
     assert "record_id varchar" in trino
     assert "recorded_at_ms bigint" in trino
     assert "CLUSTER BY" not in trino
+
+
+def test_node_hashes_round_trip(record):
+    hashes = {"engine": "v1", "relation": '"Db"."S"."Fct"', "body": "b", "macros": None}
+    original = record(node_hashes=hashes)
+    row = original.to_row()
+    assert row[COLUMN_NAMES.index("node_hashes")] == (
+        '{"body":"b","engine":"v1","macros":null,"relation":"\\"Db\\".\\"S\\".\\"Fct\\""}'
+    )
+    assert Record.from_row(row).node_hashes == hashes
+    assert record().node_hashes is None
+    assert Record.from_row(record().to_row()).node_hashes is None
+
+
+def test_add_column_sql_per_dialect():
+    assert add_column_sql("t", "delta") == "ALTER TABLE t ADD COLUMN node_hashes STRING"
+    assert add_column_sql("t", "duckdb") == "ALTER TABLE t ADD COLUMN node_hashes VARCHAR"
+    assert add_column_sql("t", "postgres") == "ALTER TABLE t ADD COLUMN node_hashes TEXT"
+    assert add_column_sql("t", "trino") == "ALTER TABLE t ADD COLUMN node_hashes varchar"
+
+
+def test_latest_records_sql_takes_any_action_and_successful_status():
+    sql = latest_records_sql("t", "?", "?", "?")
+    assert "action IN" not in sql and "action =" not in sql
+    assert "status IN ('success', 'pass', 'warn', 'fail')" in sql
+    assert "QUALIFY" not in sql.upper()
+
+
+def test_latest_records_sql_for_selection_takes_reuse_records_too():
+    sql = latest_records_sql("t", "?", "?", "?", reused=True)
+    assert "status IN ('success', 'pass', 'warn', 'fail', 'reused')" in sql
+    assert "action IN" not in sql
+
+
+def test_reads_select_null_when_the_table_has_no_node_hashes():
+    sql = latest_records_sql("t", "?", "?", "?", has_hashes=False)
+    assert "NULL AS node_hashes" in sql
+    assert "NULL AS node_hashes" not in latest_records_sql("t", "?", "?", "?")
+
+
+def test_latest_records_sql_with_any_status_drops_the_status_filter():
+    sql = latest_records_sql("t", "?", "?", "?", any_status=True)
+    assert "status" not in sql.split("WHERE", 1)[1].split(")", 1)[0]
+    assert "status IN" not in sql
+    assert "recorded_at_ms >= ?" in sql and "project_name = ?" in sql

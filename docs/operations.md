@@ -16,7 +16,7 @@ Set the mode with `hodor_mode` in `profiles.yml`, with `HODOR_MODE`, or for one 
 
 1. Run `shadow` in each environment for about a week of scheduled runs. Shadow builds are history, so `on` can reuse right away afterwards.
 2. Check the shadow records for **false reuses**: a record with mode `shadow`, decision `reuse`, and a `data_version` that differs from the node's previous build record. Fix every false reuse before you go on.
-3. Switch the environment to `on`. Go environment by environment, for example dev, then test, then prod, each with `shadow` first.
+3. Switch the environment to `on`. The mode is set per target, so each environment can run `shadow` before it turns `on`.
 4. Track the share of reused nodes, the run's wall time, and the number of false reuses (target: zero).
 
 !!! note "Limits of the shadow check"
@@ -74,7 +74,7 @@ hodor does not run these. A Delta Lake catalog has its own `optimize` and `vacuu
 
 ## Fail open
 
-Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
+Every failure leads to a build, never to a reuse. hodor does not fail a dbt run, with three exceptions: a `state:` selector that cannot compare fails the run; an incremental node whose partial clone cannot be dropped fails that node; and on dbt-core, `--defer` without `--state` fails the run when hodor cannot supply the base target. See [Decision rules](how-it-works/decision-rules.md#state-selection) and [Defer without --state](how-it-works/decision-rules.md#defer-without-state).
 
 | Failure | Behavior |
 | --- | --- |
@@ -92,18 +92,17 @@ Every failure leads to a build, never to a reuse. hodor never fails a dbt run.
 - **Volatile SQL stamps.** A volatile function in a stamp column (an output column of the final `SELECT` that reads no column, such as `current_date() as report_date`) does not count, so on reuse it keeps the value of the last build. Set `evaluate_volatile_sql: true` where a stamp must follow the clock. `is_member()` is approximated by the current user.
 - **First incremental run.** The first incremental run after a full build compiles different SQL (the `is_incremental()` branch), so it builds once more.
 - **CTE renames** count as code changes and cause one extra build.
-- **Untraceable inputs.** `read_files(...)`, other table functions and non-Delta sources are unknown, so their dependents always build.
+- **Untraceable inputs.** `read_files(...)`, other table functions and sources whose data version the adapter cannot read are unknown, so their dependents always build. Each adapter page lists what it can read.
 - **`--empty` runs.** dbt-hodor is off for the whole run: dbt builds every node and hodor records nothing. An empty run loads seeds and tables with zero rows, and a record of it could let a later run reuse them. The next normal run builds the nodes whose data changed. Snapshots are not emptied and keep their data.
 - **DuckDB state file.** One process at a time.
-- **Databricks.** Not yet run in a large production project. Delta paths on Volumes are not tested.
+- **Production use.** Not yet run in a large production project. Each adapter's own limits are on its page under [Adapters](adapters/index.md).
 
 ## Scope
 
-Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular). Adapters: `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 (Iceberg and Delta Lake connectors only; see [Data versions](adapters/trino.md#data-version)) and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](adapters/snowflake.md#data-version)), with dbt-core 1.12.x.
+Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular). Adapters: `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 (Iceberg and Delta Lake connectors only; see [Data versions](adapters/trino.md#data-version)) and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](adapters/snowflake.md#data-version)), with dbt-core 1.12.x. dbt v2 is supported through `dbt-hodor serve`, with its own limits: see [dbt v2](dbt-v2.md).
 
 Always built as plain dbt:
 
-- the node configs `pre_clone`, `allow_clones` and `defer_to_target` (for `--defer` and `dbt clone` in CI, see [Slim CI](slim-ci.md))
 - Python models
 - microbatch models
 - materialized views and streaming tables
@@ -111,4 +110,3 @@ Always built as plain dbt:
 - custom materializations
 - custom incremental strategies (reason `unsupported`)
 - unit tests
-- dbt v2 (Fusion)
