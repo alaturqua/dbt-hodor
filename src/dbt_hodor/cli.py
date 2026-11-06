@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from dbt_hodor.config import IDENT_RE, WAREHOUSE_STORES
-from dbt_hodor.records import create_table_sql
+from dbt_hodor.records import create_table_sql, lookup_index_sql
 
 
 def _ident(value: str) -> str:
@@ -40,7 +40,10 @@ def _ddl(args: argparse.Namespace) -> str:
         raise SystemExit("dbt-hodor ddl: --schema is required for postgres")
     else:
         table = ".".join(f'"{p}"' for p in (args.schema or "main", args.table))
-    return create_table_sql(table, args.store) + ";"
+    ddl = create_table_sql(table, args.store) + ";"
+    if args.store == "postgres":
+        ddl += "\n" + lookup_index_sql(args.schema, args.table) + ";"
+    return ddl
 
 
 def _open_store(

@@ -14,6 +14,8 @@ from dbt_hodor.records import (
     invocation_sql,
     latest_builds_sql,
     latest_records_sql,
+    lookup_index_name,
+    lookup_index_sql,
     prune_sql,
 )
 from dbt_hodor.store import StoreError
@@ -21,6 +23,11 @@ from dbt_hodor.store import StoreError
 # The password for one connection attempt. Called again for every reconnect, because a
 # Lakebase OAuth token lasts an hour and a run can take longer.
 Credential = Callable[[], str]
+
+CONNECT_TIMEOUT_SECONDS = 10
+# The first CREATE INDEX on a large table holds a lock that blocks appends; it gets this long
+# (the statement timeout covers the wait for the lock too), then the open goes on without it.
+INDEX_BUILD_TIMEOUT = "10s"
 
 
 def lakebase_target(endpoint: str) -> tuple[str, str, Credential]:
@@ -93,6 +100,7 @@ class PostgresStore:
             "port": port,
             "user": user,
             "sslmode": sslmode,
+            "connect_timeout": CONNECT_TIMEOUT_SECONDS,
         }
         self._connect()
         if read_only:  # dbt-hodor explain: never create or alter the schema or the table
@@ -117,6 +125,22 @@ class PostgresStore:
                 f"cannot add the node_hashes column to {self._table} (needs ALTER on the table; "
                 f"or run `ALTER TABLE {self._table} ADD COLUMN node_hashes TEXT` once): {exc}"
             ) from exc
+        self._ensure_lookup_index()
+
+    def _ensure_lookup_index(self) -> None:
+        """Best effort: without the index reads only get slower, so any failure is ignored."""
+        try:
+            name = lookup_index_name(self._name)
+            # look first: CREATE INDEX IF NOT EXISTS takes a lock on the table even when it exists
+            if not self._run(
+                "SELECT 1 FROM pg_indexes WHERE schemaname = %s AND indexname = %s",
+                [self._schema, name],
+            ):
+                with self._lock, self._con.transaction(), self._con.cursor() as cur:
+                    cur.execute(f"SET LOCAL statement_timeout = '{INDEX_BUILD_TIMEOUT}'")
+                    cur.execute(lookup_index_sql(self._schema, self._name))
+        except Exception:  # noqa: BLE001 - for example the role does not own the table
+            pass
 
     def _columns_include_hashes(self) -> bool:
         rows = self._run(

@@ -506,3 +506,131 @@ def test_postgres_store_load_latest_for_selection_reads_reuse_records(record):
     assert store.load_latest("proj", "prod", 5, reused=True)["c.s.fct"].status == "reused"
     assert "'reused')" in statements[-1][0]
     assert statements[-1][1] == ["proj", "prod", 5]
+
+
+class _FakeTransaction:
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        self.log.append(("BEGIN", None))
+
+    def __exit__(self, *exc):
+        self.log.append(("ROLLBACK" if exc[0] else "COMMIT", None))
+        return False
+
+
+class FakePgConnection:
+    """Stands in for a psycopg connection: records statements, answers pg_indexes."""
+
+    def __init__(self, log, index_exists=False, fail_index=False):
+        self.log, self.index_exists, self.fail_index = log, index_exists, fail_index
+        self.description = None
+        self._rows = []
+
+    def cursor(self):
+        return self
+
+    def transaction(self):
+        return _FakeTransaction(self.log)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        self.log.append((sql, params))
+        self.description = None
+        self._rows = []
+        if "pg_indexes" in sql:
+            self.description = [("indexname",)]
+            self._rows = [("x",)] if self.index_exists else []
+        elif "information_schema.columns" in sql:
+            self.description = [("column_name",)]
+            self._rows = [("node_hashes",)]
+        elif sql.startswith("CREATE INDEX") and self.fail_index:
+            raise RuntimeError("must be owner of table")
+
+    def fetchall(self):
+        return self._rows
+
+
+def _postgres_store(monkeypatch, table="hodor_state", read_only=False, **connection):
+    import psycopg
+
+    from dbt_hodor.store.postgres import PostgresStore
+
+    log, connects = [], []
+
+    def connect(**kwargs):
+        connects.append(kwargs)
+        return FakePgConnection(log, **connection)
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+    store = PostgresStore("db", "ops", table, "h", 5432, "u", lambda: "pw", read_only=read_only)
+    return store, log, connects
+
+
+def test_postgres_store_sets_a_connect_timeout_on_every_connection(monkeypatch):
+    pytest.importorskip("psycopg")
+    import psycopg
+
+    store, _, connects = _postgres_store(monkeypatch)
+    assert connects[0]["connect_timeout"] == 10
+    store._con.execute = lambda *a, **k: (_ for _ in ()).throw(psycopg.OperationalError("gone"))
+    store._run("SELECT 1")  # reconnects, then the second try runs on the new connection
+    assert len(connects) == 2 and connects[1]["connect_timeout"] == 10
+
+
+def test_postgres_store_creates_the_lookup_index_when_missing(monkeypatch):
+    pytest.importorskip("psycopg")
+    _, log, _ = _postgres_store(monkeypatch)
+    sqls = [sql for sql, _ in log]
+    check = next(i for i, s in enumerate(sqls) if "pg_indexes" in s)
+    assert log[check][1] == ["ops", "hodor_state_lookup"]
+    create = next(s for s in sqls if s.startswith("CREATE INDEX"))
+    assert create == (
+        'CREATE INDEX IF NOT EXISTS "hodor_state_lookup" ON "ops"."hodor_state" '
+        "(project_name, target_name, recorded_at_ms)"
+    )
+    assert sqls.index(create) > check
+
+
+def test_postgres_store_bounds_the_index_build_in_its_own_transaction(monkeypatch):
+    pytest.importorskip("psycopg")
+    _, log, _ = _postgres_store(monkeypatch)
+    sqls = [sql for sql, _ in log]
+    begin = sqls.index("BEGIN")
+    assert sqls[begin + 1] == "SET LOCAL statement_timeout = '10s'"
+    assert sqls[begin + 2].startswith("CREATE INDEX")
+    assert sqls[begin + 3] == "COMMIT"
+
+
+def test_postgres_store_skips_the_index_statement_when_it_exists(monkeypatch):
+    pytest.importorskip("psycopg")
+    _, log, _ = _postgres_store(monkeypatch, index_exists=True)
+    assert not any(sql.startswith("CREATE INDEX") for sql, _ in log)
+
+
+def test_postgres_store_opens_when_the_index_cannot_be_created(monkeypatch):
+    pytest.importorskip("psycopg")
+    store, _, _ = _postgres_store(monkeypatch, fail_index=True)
+    assert store is not None
+
+
+def test_postgres_store_read_only_open_never_touches_the_index(monkeypatch):
+    pytest.importorskip("psycopg")
+    _, log, _ = _postgres_store(monkeypatch, read_only=True)
+    assert not any("pg_indexes" in sql or "INDEX" in sql for sql, _ in log)
+
+
+def test_postgres_lookup_index_name_fits_the_63_byte_limit(monkeypatch):
+    pytest.importorskip("psycopg")
+    table = "t" * 60
+    _, log, _ = _postgres_store(monkeypatch, table=table)
+    name = next(p[1] for s, p in log if "pg_indexes" in s)
+    assert len(name.encode()) <= 63 and name.endswith("_lookup")
+    create = next(s for s, _ in log if s.startswith("CREATE INDEX"))
+    assert f'"{name}"' in create

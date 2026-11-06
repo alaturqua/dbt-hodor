@@ -120,6 +120,24 @@ def add_column_sql(table: str, dialect: str) -> str:
     return f"ALTER TABLE {table} ADD COLUMN node_hashes {TYPE_NAMES[dialect]['text']}"
 
 
+POSTGRES_NAME_LIMIT = 63  # bytes; Postgres cuts longer identifiers without a warning
+_LOOKUP_SUFFIX = "_lookup"
+
+
+def lookup_index_name(table_name: str) -> str:
+    """Name of the Postgres lookup index, cut so a long table name still yields a name that
+    fits the identifier limit and can be found by an exact match."""
+    return table_name[: POSTGRES_NAME_LIMIT - len(_LOOKUP_SUFFIX)] + _LOOKUP_SUFFIX
+
+
+def lookup_index_sql(schema: str, table_name: str) -> str:
+    """Index on the columns every read filters by. Names are already validated."""
+    return (
+        f'CREATE INDEX IF NOT EXISTS "{lookup_index_name(table_name)}" '
+        f'ON "{schema}"."{table_name}" (project_name, target_name, recorded_at_ms)'
+    )
+
+
 def select_columns(has_hashes: bool = True) -> str:
     """The column list of a read. A table without `node_hashes` (read-only open of an old
     table) yields NULL for it."""

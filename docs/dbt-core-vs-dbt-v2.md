@@ -29,7 +29,7 @@ Use this page to see what differs. For dbt-core, start with [Getting started](ge
 | Clone | On by default (`allow_clones`) where the adapter reports `can_clone_table`; `pre_clone` is supported. See [Clones](#clones). | Off unless the server starts with `--allow-clones`. `pre_clone` has no effect. | [Decision rules](how-it-works/decision-rules.md#cloning-from-the-base-target), [Databricks](adapters/databricks.md#clones-and-dbt-v2), [dbt v2](dbt-v2.md#clones) |
 | `explain` | `dbt-hodor explain` reads the state table | `dbt state explain` asks the running server. `dbt-hodor explain` cannot open a DuckDB file while the server holds it. | [Operations](operations.md), [dbt v2](dbt-v2.md#limits) |
 | Shadow mode | Yes, and it is the default | No. The server always decides and always records. `HODOR_MODE` is ignored. | [Operations](operations.md), [dbt v2](dbt-v2.md#install-and-start) |
-| Tested live | End-to-end tests on DuckDB. Live tests on a Databricks workspace, including a clone and `pre_clone`, on Trino with the Iceberg connector, and on a Lakebase Postgres store. The live test for Snowflake did not run for the current version. | 13 live tests with dbt 2.0.8 on a Databricks SQL warehouse, with the server on a DuckDB store. The `postgres` store has not run behind the server live. | [Development](development.md#tests), [dbt v2](dbt-v2.md) |
+| Tested live | End-to-end tests on DuckDB. Live tests on a Databricks workspace, including a clone and `pre_clone`, on Trino with the Iceberg connector, and on a Lakebase Postgres store. The live test for Snowflake did not run for the current version. | 13 live tests with dbt 2.0.8 on a Databricks SQL warehouse, with the server on a DuckDB store. The `postgres` store behind the server ran live only with a gRPC client in place of dbt, on local Postgres 17 in Docker and on Lakebase (no dbt binary). | [Development](development.md#tests), [dbt v2](dbt-v2.md) |
 
 ## Settings
 
@@ -55,7 +55,7 @@ Both engines compare each node with the latest successful record of the base tar
 
 On dbt v2:
 
-- The server reads the base target's records from the store again for each selection. Decisions, defer and clones use the records loaded at the first request, plus those the server wrote itself.
+- The server reads the base target's records from the store again for each selection. Decisions, defer and clones use the records loaded at the first request of the run, plus those the server wrote itself, and load them again for the next run.
 - The base target must share the store with the target that runs. A base target with no records in the store gives `new` for every node.
 - dbt 2.0.8 sends no macros hash and no persisted descriptions hash, and sends no relation with the base records, so `state:modified.macros`, `state:modified.relation` and `state:modified.persisted_descriptions` fail the selection.
 - A node whose latest base record was written by the other engine (`v1` from dbt-core, `v2` from the server) counts as modified.
@@ -75,4 +75,4 @@ The default on dbt v2 follows a Databricks limit. A table cloned into another ta
 What ran is listed in [Development](development.md#tests).
 
 - dbt-core: end-to-end tests on dbt-duckdb; live tests on a Databricks workspace (the lifecycle, slim CI, a shallow clone and `pre_clone`); a live test on Trino with the Iceberg connector. The Trino Delta Lake connector has unit tests only. The live test on a Lakebase Postgres store ran for the current version; the live test for Snowflake exists but did not.
-- dbt v2: requests recorded from dbt 2.0.8, unit and server tests, and 13 live tests with dbt 2.0.8 on a Databricks SQL warehouse. The `postgres` store has not run behind the server live; see [Postgres and Lakebase](stores/postgres.md).
+- dbt v2: requests recorded from dbt 2.0.8, unit and server tests, and 13 live tests with dbt 2.0.8 on a Databricks SQL warehouse. The `postgres` store behind the server ran live with a gRPC client in place of dbt, against the real `dbt-hodor serve` process on local Postgres 17 in Docker and on a Lakebase endpoint that was already awake; no dbt binary was involved; see [Postgres and Lakebase](stores/postgres.md).

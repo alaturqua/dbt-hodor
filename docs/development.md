@@ -141,6 +141,21 @@ dbt imports every installed top-level module named `dbt_*` that has a `plugins` 
     uv run pytest -m postgres tests/e2e/test_postgres_state.py
     ```
 
+- The live test in `tests/integration/test_v2_postgres.py` starts `dbt-hodor serve --store postgres --port 0` as a process on a real Postgres. A gRPC client plays dbt, so it needs no dbt binary and no warehouse. It covers: `ValidateClientVersion` answering (and every decision building) while the store cannot open; a first decision with `no_history`, its confirmation, and a stop that writes the queued record; a new server process reusing the unchanged node (`no_new_data`); a record appended by another writer between two `ValidateClientVersion` calls, seen by the next decision only after the second call; and the lookup index on the state table. It also seeds 3,000 more nodes through `PostgresStore`, starts a new server and prints the time from process start to the first answered decision, asserting only that the answer is not `store_slow`. It uses the variables of the Postgres test above, passes them to the server as `HODOR_*` variables, and writes to a state table named `hodor_v2_live_<random>` that it drops at the end. It creates `HODOR_PG_SCHEMA` if it is missing and drops it only in that case, without `CASCADE`. It is marked `postgres` and skipped by default. It ran against Postgres 17 in Docker on Windows and against a Lakebase endpoint that was already awake. On Lakebase, from a Windows machine, the first decision with 3,001 nodes took about 9 s; a wake from scale to zero was not measured.
+
+    ```sh
+    docker run -d --rm --name hodor-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17
+    HODOR_PG_HOST=localhost \
+    HODOR_PG_USER=postgres \
+    HODOR_PG_PASSWORD=postgres \
+    HODOR_PG_DATABASE=postgres \
+    HODOR_PG_SCHEMA=hodor_v2_live \
+    HODOR_PG_SSLMODE=disable \
+    uv run --extra postgres --extra v2 pytest -m postgres tests/integration/test_v2_postgres.py
+    ```
+
+    For Lakebase, set `HODOR_PG_ENDPOINT` instead of the host variables, as in the Postgres test above. The test stops the server by creating a stop file that a small launcher watches; it ends the wait of `serve` with `KeyboardInterrupt`, because Windows cannot send Ctrl-C to a child process in its own group. The shutdown that follows is the server's own.
+
 ## Line endings
 
 Every file uses LF line endings and UTF-8 (`.editorconfig`, `.gitattributes` with `eol=lf`). On Windows, check new files with `git ls-files --eol` and aim for `w/lf`.
