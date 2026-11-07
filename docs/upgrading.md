@@ -4,12 +4,13 @@ What changes for a running project from one release to the next. Each release li
 
 Until 1.0, the settings and the record schema may change in a minor release.
 
-## Unreleased
+## 0.4.1
 
 ### Behavior changes
 
 - **dbt v2: the server waits for the store once per run.** Decisions, state selection and defer share one wait of 30 seconds. It was 2 seconds per decision, so a slow store made nodes build with `store_slow` that now wait for their records, and a hung store cost every node 2 seconds. For decisions the wait is one budget per project and target and per run, and no request waits more than 30 seconds. Nothing to set.
 - **dbt v2: a store that failed to open is opened again at the next run.** Before, every decision built until the server restarted.
+- **`dbt-databricks` 1.13.0 merges `tblproperties` across config levels.** A project that sets them at more than one level can see one build with `config_changed` after upgrading the adapter. See [Databricks](adapters/databricks.md#limits).
 - **dbt v2: records are read again for each run.** Before, the server loaded the records once, so another process's builds were not seen until it restarted, and records that were pruned or deleted stayed in memory. Each `ValidateClientVersion` now starts a reload from an empty copy, keeping only the records this server wrote that are not yet stored. A node whose records are still loading builds rather than reusing from the earlier run's copy.
 - **dbt v2: records carry the `x-dbt-invocation-id` of their request.** Without the header they carry the id of the latest `ValidateClientVersion`, as before. Tested with the header sent by the tests; not checked live against dbt.
 - **Postgres store: the first open of an existing table builds an index.** hodor creates `<hodor_table>_lookup` on `(project_name, target_name, recorded_at_ms)` if it is missing, which on a large table blocks appends while it runs. The build is limited to 10 seconds (`SET LOCAL statement_timeout`); if it times out, or the role does not own the table, the index is not created, reads stay slower and the next open tries again. `dbt-hodor ddl --store postgres` prints the statement for creating it by hand. Connection attempts to Postgres now give up after 10 seconds.

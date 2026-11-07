@@ -5,6 +5,22 @@ and the project follows [semantic versioning](https://semver.org).
 
 Until 1.0 the settings and the record schema may change in a minor release.
 
+## [0.4.1] - 2026-11-07
+
+### Bug fixes
+
+- **v2**: Stop rebuilding unchanged nodes on a slow state store ([#27](https://github.com/alaturqua/dbt-hodor/issues/27))
+
+### Build and CI
+
+- Add a manual workflow for the live Databricks tests ([#26](https://github.com/alaturqua/dbt-hodor/issues/26))
+
+### Dependencies
+
+- Bump dbt-databricks to 1.13.0 and the other dbt adapters ([#28](https://github.com/alaturqua/dbt-hodor/issues/28))
+- Bump pyasn1 from 0.6.4 to 0.6.5 ([#25](https://github.com/alaturqua/dbt-hodor/issues/25))
+
+
 ## [0.4.0] - 2026-11-01
 
 ### Dependencies
