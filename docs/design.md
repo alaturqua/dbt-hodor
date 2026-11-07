@@ -12,7 +12,7 @@ dbt-hodor is a free, self-hosted alternative to dbt Labs' dbt State. During a db
 
 Requirements:
 
-- Runs inside dbt-core 1.12.x with dbt-databricks 1.12.7 on Unity Catalog. Development and tests use dbt-core 1.12.5.
+- Runs inside dbt-core 1.12.x with dbt-databricks 1.13.0 on Unity Catalog. Development and tests use dbt-core 1.12.6.
 - Needs no dbt platform account and sends nothing to external services.
 - Stores state in a Delta table (default on Databricks), in a Trino table, in a Postgres database such as Databricks Lakebase, or in a local DuckDB file.
 - Uses the dbt State model configs (`state:` block), so projects can switch between the two.
@@ -34,7 +34,7 @@ Main target: large scheduled dbt runs on Databricks that rebuild every model in 
 ### In scope
 
 - Per-node decision for `dbt run`, `dbt build`, `dbt test`, `dbt seed` and `dbt snapshot`: reuse or build.
-- Models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where) and `view`. An unset incremental strategy counts as merge, the dbt-databricks default (upstream wrongly maps it to append). Custom strategies build as unsupported. These are the dbt-databricks 1.12.7 strategies (`valid_incremental_strategies`, `impl.py:962`) except `microbatch`.
+- Models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where) and `view`. An unset incremental strategy counts as merge, the dbt-databricks default (upstream wrongly maps it to append). Custom strategies build as unsupported. These are the dbt-databricks 1.13.0 strategies (`valid_incremental_strategies`, `impl.py:987`) except `microbatch`.
 - Seeds and snapshots. Both follow the table rules. A seed's code hash is the sha256 of its CSV file with line endings normalized: dbt's own checksum covers only the path for seeds above `--maximum-seed-size-mib`. `dbt seed --show` always builds, because it prints each result's loaded table.
 - Data tests (generic and singular): the recorded result is replayed when nothing they test has changed.
 - Model configs `lag_tolerance`, `require_fresh_data_from`, `compare_unrendered_code`, `execute_hooks_on_any_reuse`.
@@ -373,7 +373,7 @@ The results feed sections 7.1, 7.3 and 9.2 before the engine is built.
 - uv manages the project and builds it. Layout: `uv init --lib` (src layout), build backend `uv_build`, `requires-python = ">=3.10"` (dbt-core 1.12.5 requires 3.10 or newer), development on Python 3.12 to match DBR 18.
 - **Dependencies:** `dbt-core>=1.12,<1.13` and `sqlglot>=30.22,<31`. No adapter is a hard dependency; hodor disables itself on adapters other than databricks, duckdb, snowflake and trino.
 - **Extras:** `duckdb` (`duckdb>=1.0`), `postgres` (`psycopg[binary]>=3.2`) and `lakebase` (adds `databricks-sdk>=0.81` for the Lakebase token).
-- **Dev group:** pytest, ruff, duckdb, dbt-duckdb (local warehouse for end-to-end tests), `dbt-databricks==1.12.7` and `dbt-trino==1.10.6` and `dbt-snowflake==1.12.4` (to test against the real adapter code).
+- **Dev group:** pytest, ruff, duckdb, dbt-duckdb (local warehouse for end-to-end tests), `dbt-databricks==1.13.0` and `dbt-trino==1.11.0` and `dbt-snowflake==1.12.5` (to test against the real adapter code; Snowflake last ran live on 1.12.4).
 - **Console script:** `dbt-hodor = dbt_hodor.cli:main`.
 - **Build:** `uv build` makes the wheel and the sdist. Both install paths are supported and documented:
   - a wheel in a UC volume, uploaded with `databricks fs cp`, and installed by jobs with `libraries: - whl: /Volumes/<catalog>/<schema>/<volume>/dbt_hodor-<version>-py3-none-any.whl`;

@@ -1,6 +1,6 @@
 # Databricks
 
-hodor on `dbt-databricks`, tested with `dbt-databricks` 1.12.7. Tested live on a Databricks workspace; see [Development](../development.md).
+hodor on `dbt-databricks`, tested with `dbt-databricks` 1.13.0. Tested live on a Databricks workspace; see [Development](../development.md).
 
 ## Install
 
@@ -90,5 +90,7 @@ Unknown operations count as changes on purpose. A new Delta operation name can c
 
 - A source that is not a Delta table (a foreign table, a view) has an unknown version, so dependents build.
 - Not yet run in a large production project.
+- `dbt-databricks` 1.13.0 merges `tblproperties` across config levels. A project that sets them at more than one level can see one build with `config_changed` after upgrading the adapter.
+- The live tests on 1.13.0 do not cover views that use `*`, `tblproperties` set at several levels, `transaction: false` hooks, table tags or `persist_docs`.
 - Delta paths on Volumes were not tested.
 - On dbt v2, a table cloned into a dev target cannot be replaced in place when its base table has automatic liquid clustering (`clusterByAuto`; the test workspace set it on tables created without `CLUSTER BY`). The shallow clone keeps the property, and dbt v2 replaces the table with `CREATE OR REPLACE TABLE ... AS SELECT`, which fails with `CLUSTER_BY_AUTO_UNSUPPORTED_TABLE_TYPE_ERROR`. In the live test this happened when the model's code changed after the clone, and `--full-refresh` failed the same way. Dropping the table in the dev target let the model build. The server runs no SQL, so it cannot drop the clone itself. This is why `dbt-hodor serve` clones only with `--allow-clones`. On dbt-core this does not happen: dbt-databricks 1.12.7 drops a shallow clone before it replaces it, and the live test rebuilt a changed model over its auto-clustered clone.

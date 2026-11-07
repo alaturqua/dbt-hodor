@@ -99,7 +99,7 @@ Every failure leads to a build, never to a reuse. hodor does not fail a dbt run,
 
 ## Scope
 
-Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular). Adapters: `dbt-databricks` 1.12.7, `dbt-duckdb`, `dbt-trino` 1.10.6 (Iceberg and Delta Lake connectors only; see [Data versions](adapters/trino.md#data-version)) and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](adapters/snowflake.md#data-version)), with dbt-core 1.12.x. dbt v2 is supported through `dbt-hodor serve`, with its own limits: see [dbt v2](dbt-v2.md).
+Supported: models materialized as `table`, `incremental` (append, merge, delete+insert, insert_overwrite, replace_where; an unset strategy counts as merge) and `view`, seeds, snapshots, and data tests (generic and singular). Adapters: `dbt-databricks` 1.13.0, `dbt-duckdb`, `dbt-trino` 1.11.0 (Iceberg and Delta Lake connectors only; see [Data versions](adapters/trino.md#data-version)) and `dbt-snowflake` 1.12.4 (state in DuckDB or Postgres; see [Data versions](adapters/snowflake.md#data-version)), with dbt-core 1.12.x. dbt v2 is supported through `dbt-hodor serve`, with its own limits: see [dbt v2](dbt-v2.md).
 
 Always built as plain dbt:
 

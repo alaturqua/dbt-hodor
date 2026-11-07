@@ -65,10 +65,10 @@ select = ["E", "F", "I", "B", "UP"]
 
 [dependency-groups]
 dev = [
-    "dbt-databricks==1.12.7",
-    "dbt-duckdb>=1.11.0",
+    "dbt-databricks==1.13.0",
+    "dbt-duckdb>=1.11.1",
     "dbt-trino==1.11.0",
-    "dbt-snowflake==1.12.4",
+    "dbt-snowflake==1.12.5",
     "duckdb>=1.0",
     "git-cliff>=2.6",
     "grpcio>=1.81.1",
