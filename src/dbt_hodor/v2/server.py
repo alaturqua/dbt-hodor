@@ -1,8 +1,12 @@
 """The local gRPC state server that dbt v2 asks whether to run each node.
 
 Fail open: any error, a store that cannot open or a slow store answers "build", no defer
-and no clone. No decision waits on the store for more than `STORE_WAIT_S`, and
-`ValidateClientVersion` never touches it: dbt stops the run when that call times out.
+and no clone. Records are read again for each dbt run (each `ValidateClientVersion`), and a
+store that failed to open is opened again then. One wait budget, `STORE_WAIT_S`, covers the
+records of a project and target for a whole run: the first decision that needs them starts
+the clock, later ones wait only until the same deadline, and no single request waits
+longer than the budget. `ValidateClientVersion` never touches the store: dbt stops the run
+when that call times out.
 
 The one exception is `GetStateSelection`: a `state:` selection that cannot be compared fails
 the run with a gRPC error, as dbt-core does without a comparison manifest. A guess could run
@@ -70,11 +74,11 @@ _MODULES = (
     selector_service_pb2,
     sql_service_pb2,
 )
-# How long a decision waits for the records of its project and target.
-STORE_WAIT_S = 2.0
-# How long a state selection waits for the base target's records, read again for each
-# selection. It never answers from less than all of them.
-SELECTION_WAIT_S = 30.0
+# The one wait budget, below the ~60 s dbt waits for an answer. A decision waits for the
+# records of its project and target until a deadline set by the first decision of the dbt
+# run that needs them (and never longer than this for one request). A state selection and
+# a defer wait this long, selection never answering from less than all the records.
+STORE_WAIT_S = 30.0
 # statuses of the records state selection compares with: a model's reuse counts
 _SELECTION_STATUSES = (*SUCCESS_STATUSES, REUSED)
 # Telemetry sessions kept for their defer target: the latest few dbt invocations.
@@ -97,10 +101,11 @@ def now_ms() -> int:
 
 @dataclass
 class _Records:
-    """The records of one project and target, loaded once in the background."""
+    """The records of one project and target, loaded in the background once per dbt run."""
 
     ready: threading.Event = field(default_factory=threading.Event)
     ok: bool = False
+    stale: bool = False  # a new dbt run began: `_entry` replaces it with an empty one, reloaded
     error: str | None = None  # why the load failed
     version: int = 0  # changes with `builds`
     # (version, latest build per unique_id): clone looks up its base record by id
@@ -180,9 +185,13 @@ def _newer(current: Record | None, record: Record) -> bool:
     )
 
 
-def _explain_lines(facts: NodeFacts, last: Record | None, node_key: str) -> list[Any]:
+def _explain_lines(
+    facts: NodeFacts, last: Record | None, node_key: str, decision: Decision
+) -> list[Any]:
     """One line per input the decision compared with the last build."""
     line = explain_service_pb2.ExplainLine
+    if decision.reason in ("store_slow", "hodor_error"):
+        return [line(text=f"records not loaded: {decision.reason}")]  # nothing was compared
     if last is None:
         return [line(text="no build record for this node")]
 
@@ -234,9 +243,11 @@ class StateServer:
         self._store_ready = threading.Event()
         self._lock = threading.Lock()
         self._loads: dict[tuple[str, str], _Records] = {}
-        # (project, target): latest record per node_key this server wrote, reuses included,
-        # for state selection before the writer has stored them
-        self._written: dict[tuple[str, str], dict[str, Record]] = {}
+        # (project, target): when decisions stop waiting for the records, this dbt run
+        self._deadlines: dict[tuple[str, str], float] = {}
+        # record_id: records this server wrote that the writer has not stored yet. A load or a
+        # selection that reads the store adds them to what it read, so no record is missed
+        self._unflushed: dict[str, Record] = {}
         self._pending: dict[str, _Pending] = {}
         self._explained: dict[str, tuple[int, Any]] = {}  # id: (kept at ms, entry)
         self._queue: queue.Queue[Any] = queue.Queue()
@@ -286,6 +297,9 @@ class StateServer:
         if self._server is not None:
             self._server.stop(grace=1).wait()
             self._server = None
+            with self._lock:  # requests still waiting for records answer build, not 30 s later
+                for entry in self._loads.values():
+                    entry.ready.set()
             self._executor.shutdown(wait=True)
         self._queue.put(_STOP)
         with self._lock:
@@ -302,6 +316,17 @@ class StateServer:
                 log.warning("dbt-hodor: closing the store failed: %s", exc)
             self._store = None
 
+    def _reopen_store(self) -> None:
+        """Open a store that failed to open again, in the background. A run is the unit of
+        retry: a store that stays down costs the decisions their wait once per run."""
+        with self._lock:
+            if self._store is not None or not self._store_ready.is_set():
+                return  # open, or still opening
+            self._store_ready.clear()
+            opener = threading.Thread(target=self._open_store, name="hodor-store-open", daemon=True)
+            self._threads = [t for t in self._threads if t.is_alive()] + [opener]
+        opener.start()
+
     def _open_store(self) -> None:
         try:
             self._store = self._store_factory()
@@ -313,22 +338,26 @@ class StateServer:
 
     def _write_loop(self) -> None:
         """The one writer: dbt sends requests in parallel, the store gets one append at a time."""
-        self._store_ready.wait()
         while True:
             batch = [self._queue.get()]
+            self._store_ready.wait()  # the store may be opening again
+            store = self._store
             while True:
                 try:
                     batch.append(self._queue.get_nowait())
                 except queue.Empty:
                     break
             records = [r for r in batch if r is not _STOP]
-            if records and self._store is None:
+            if records and store is None:
                 log.warning("dbt-hodor: no state store, %d records lost", len(records))
-            elif records:
+            elif records and store is not None:
                 try:
-                    self._store.append(records)  # type: ignore[union-attr]
+                    store.append(records)
                 except Exception as exc:  # noqa: BLE001 - the next run builds these nodes
                     log.warning("dbt-hodor: %s; %d records lost", exc, len(records))
+            with self._lock:  # stored or lost, they are no longer waiting
+                for record in records:
+                    self._unflushed.pop(record.record_id, None)
             if len(records) < len(batch):
                 return
 
@@ -395,31 +424,58 @@ class StateServer:
 
     def _entry(self, key: tuple[str, str]) -> _Records:
         with self._lock:
-            entry = self._loads.get(key)
-            if entry is None:
-                entry = self._loads[key] = _Records()
-                loader = threading.Thread(
-                    target=self._load, args=(key, entry), name="hodor-load", daemon=True
-                )
-                self._threads = [t for t in self._threads if t.is_alive()] + [loader]
-                loader.start()
-            return entry
+            return self._entry_locked(key)
+
+    def _entry_locked(self, key: tuple[str, str]) -> _Records:
+        """The records of a key for this run; a missing or stale entry is replaced by an
+        empty one that is loaded in the background (`ok` is False until then). The lock is held."""
+        entry = self._loads.get(key)
+        if entry is None or entry.stale:
+            entry = self._loads[key] = _Records()
+            loader = threading.Thread(
+                target=self._load, args=(key, entry), name="hodor-load", daemon=True
+            )
+            self._threads = [t for t in self._threads if t.is_alive()] + [loader]
+            loader.start()
+        return entry
+
+    @staticmethod
+    def _apply(entry: _Records, record: Record) -> None:
+        """Keep a record in the entry when it is the newest of its kind. The lock is held."""
+        if record.status in SUCCESS_STATUSES and _newer(entry.latest.get(record.node_key), record):
+            entry.latest[record.node_key] = record
+        if (
+            record.action in (BUILD, CARRY)
+            and record.status in SUCCESS_STATUSES
+            and _newer(entry.builds.get(record.node_key), record)
+        ):
+            entry.builds[record.node_key] = record
+            entry.version += 1
 
     def _load(self, key: tuple[str, str], entry: _Records) -> None:
         self._store_ready.wait()
         store = self._store
         try:
             if store is None:
+                # every decision builds; the entry stays until the next run replaces it, so a
+                # store that is down starts one loader, not one per request
                 entry.error = self._store_error or "no state store"
-                return  # every decision builds; the store is not opened again
+                return
             since = now_ms() - self.lookback_days * DAY_MS
+            with self._lock:  # before the read: a record flushed after it is in the snapshot
+                waiting = [
+                    r for r in self._unflushed.values() if (r.project_name, r.target_name) == key
+                ]
             builds = store.load(key[0], key[1], since)
             latest = store.load_latest(key[0], key[1], since)
-            with self._lock:  # a record this server wrote meanwhile is newer than the store's
+            with self._lock:  # the store's records, and what it may not hold yet
+                # the store's rows are already the latest build and the latest record
                 for target, loaded in ((entry.builds, builds), (entry.latest, latest)):
                     for node_key, record in loaded.items():
                         if _newer(target.get(node_key), record):
                             target[node_key] = record
+                for record in waiting:
+                    self._apply(entry, record)
                 entry.version += 1
                 entry.ok = True
         except Exception as exc:  # noqa: BLE001 - this decision builds, the next one retries
@@ -431,10 +487,19 @@ class StateServer:
         finally:
             entry.ready.set()
 
-    def _records(self, key: tuple[str, str]) -> tuple[_Records | None, Decision | None]:
-        """The loaded records, or the build decision when they are not there in time."""
+    def _records(
+        self, key: tuple[str, str], asked: float | None = None
+    ) -> tuple[_Records | None, Decision | None]:
+        """The loaded records, or the build decision when they are not there in time.
+
+        The wait ends at the run's deadline for this key, set by the first request that
+        needed it, and never later than `asked` (the request's start) plus the budget."""
+        asked = time.monotonic() if asked is None else asked
         entry = self._entry(key)
-        if not entry.ready.wait(STORE_WAIT_S):
+        with self._lock:
+            deadline = self._deadlines.setdefault(key, time.monotonic() + STORE_WAIT_S)
+        deadline = min(deadline, asked + STORE_WAIT_S)
+        if not entry.ready.wait(max(0.0, deadline - time.monotonic())):
             return None, Decision(BUILD, "store_slow")
         with self._lock:
             ok = entry.ok
@@ -465,23 +530,9 @@ class StateServer:
     def _write(self, record: Record) -> None:
         """Queue a record, and keep it for this server's next decisions."""
         key = (record.project_name, record.target_name)
-        entry = self._entry(key)
-        with self._lock:
-            if record.status in _SELECTION_STATUSES:
-                written = self._written.setdefault(key, {})
-                if _newer(written.get(record.node_key), record):
-                    written[record.node_key] = record
-            if record.status in SUCCESS_STATUSES and _newer(
-                entry.latest.get(record.node_key), record
-            ):
-                entry.latest[record.node_key] = record
-            if (
-                record.action in (BUILD, CARRY)
-                and record.status in SUCCESS_STATUSES
-                and _newer(entry.builds.get(record.node_key), record)
-            ):
-                entry.builds[record.node_key] = record
-                entry.version += 1
+        with self._lock:  # one section: the entry cannot be replaced between look-up and use
+            self._apply(self._entry_locked(key), record)
+            self._unflushed[record.record_id] = record
         self._queue.put(record)
 
     def _record(self, p: _Pending, action: str, status: str, **extra: Any) -> Record:
@@ -526,6 +577,11 @@ class StateServer:
     def _validate(self, req: Any, out_cls: Any, context: Any) -> Any:
         self._invocation = str(uuid.uuid4())  # dbt validates once per run
         self._update_session(_invocation_id(context), started_ms=now_ms())
+        self._reopen_store()
+        with self._lock:  # a new run reads the records again; the first decision loads them
+            for entry in self._loads.values():
+                entry.stale = True
+            self._deadlines.clear()
         return out_cls(is_supported=req.dbt_run_cache_version in SUPPORTED_CLIENT_VERSIONS)
 
     def _submit_sql(self, req: Any, out_cls: Any, context: Any) -> Any:
@@ -537,7 +593,7 @@ class StateServer:
     def _submit(self, req: Any, out_cls: Any, context: Any, seed: bool) -> Any:
         request_id = str(uuid.uuid4())
         started = now_ms()
-        invocation = self._invocation
+        asked = time.monotonic()
         state = req.dbt_node_state if req.HasField("dbt_node_state") else None
         if state is None or not req.target_table:
             decision = Decision(BUILD, "unsupported")
@@ -546,8 +602,9 @@ class StateServer:
         key = (state.project_name or self.project_name, state.target_name)
         node_key = normalize(req.target_table)
         dbt_invocation = _invocation_id(context)
+        invocation = dbt_invocation or self._invocation
         self._update_session(dbt_invocation, target=key[1])
-        entry, decision = self._records(key)
+        entry, decision = self._records(key, asked)
         with self._lock:
             last = entry.builds.get(node_key) if entry else None
             latest = entry.latest.get(node_key) if entry else None
@@ -570,7 +627,9 @@ class StateServer:
         if not seed and entry is not None:
             self._mark_stale_seeds(req, entry, node_key, invocation)
             try:
-                found = self._clone(req, key, entry, facts, analysis, decision, dbt_invocation)
+                found = self._clone(
+                    req, key, entry, facts, analysis, decision, dbt_invocation, asked
+                )
             except Exception as exc:  # noqa: BLE001 - the node builds as decided
                 log.warning("dbt-hodor: clone check failed, building: %r", exc)
                 found = None
@@ -595,7 +654,7 @@ class StateServer:
             self._write(self._record(pending, REUSE, REUSED))
         else:
             self._keep(self._pending, request_id, pending, started)
-        lines = _explain_lines(facts, last, node_key)
+        lines = _explain_lines(facts, last, node_key, decision)
         self._remember_explain(request_id, decision, lines, started, clone is not None)
         return answer(decision, request_id, clone, out_cls)
 
@@ -608,6 +667,7 @@ class StateServer:
         analysis: SqlAnalysis | None,
         decision: Decision,
         dbt_invocation: str,
+        asked: float,
     ) -> tuple[Decision, CloneAnswer] | None:
         """The clone decision and answer when the base target's table may be cloned."""
         if decision.action != BUILD or analysis is None:
@@ -615,7 +675,7 @@ class StateServer:
         base_target = self._session(dbt_invocation).defer_to
         if not base_target or base_target == key[1]:
             return None
-        base_entry, _ = self._records((key[0], base_target))
+        base_entry, _ = self._records((key[0], base_target), asked)
         if base_entry is None:
             return None
         base = self._base_build(base_entry, req.dbt_node_state.node_unique_id)
@@ -729,10 +789,11 @@ class StateServer:
     def _record_executions(self, req: Any, out_cls: Any, context: Any) -> Any:
         """Builds dbt ran without asking (incremental models under --full-refresh)."""
         stored = 0
-        started = self._session(_invocation_id(context)).started_ms
+        dbt_invocation = _invocation_id(context)
+        started = self._session(dbt_invocation).started_ms
         for item in req.records:
             try:
-                record = self._executed(item, started)
+                record = self._executed(item, started, dbt_invocation or self._invocation)
             except Exception as exc:  # noqa: BLE001 - the other entries are still recorded
                 log.warning("dbt-hodor: cannot record an execution: %r", exc)
                 continue
@@ -741,7 +802,7 @@ class StateServer:
                 stored += 1
         return out_cls(records_stored=stored)
 
-    def _executed(self, item: Any, started: int) -> Record | None:
+    def _executed(self, item: Any, started: int, invocation: str) -> Record | None:
         """The build record of one RecordExecutions entry; None when it names no node.
 
         dbt may report an execution long after it ran, so its start is taken as the start of
@@ -768,7 +829,7 @@ class StateServer:
             node_hashes=v2_node_hashes(state, sub.target_table),
             decision=Decision(BUILD, "full_refresh"),
             started_ms=started,
-            invocation=self._invocation,
+            invocation=invocation,
             project=state.project_name or self.project_name,
             target=state.target_name,
             node_key=normalize(sub.target_table),
@@ -853,21 +914,27 @@ class StateServer:
     def _selection_records(self, key: tuple[str, str]) -> list[Record]:
         """The latest successful or reuse record per node of a target, read from the store for
         each selection, so runs other processes wrote since the server started count."""
-        deadline = time.monotonic() + SELECTION_WAIT_S
+        deadline = time.monotonic() + STORE_WAIT_S
 
         def unavailable(why: str) -> _Abort:
             return _Abort(
                 grpc.StatusCode.UNAVAILABLE, f"dbt-hodor cannot compare with {key[1]}: {why}"
             )
 
-        slow = unavailable(f"the state store did not answer in {SELECTION_WAIT_S:g} s")
-        if not self._store_ready.wait(SELECTION_WAIT_S):
+        slow = unavailable(f"the state store did not answer in {STORE_WAIT_S:g} s")
+        if not self._store_ready.wait(STORE_WAIT_S):
             raise slow
         store = self._store
         if store is None:
             raise unavailable(self._store_error or "no state store")
         since = now_ms() - self.lookback_days * DAY_MS
         found: dict[str, Any] = {}
+        with self._lock:  # before the read, as in `_load`
+            waiting = [
+                r
+                for r in self._unflushed.values()
+                if (r.project_name, r.target_name) == key and r.status in _SELECTION_STATUSES
+            ]
 
         def read() -> None:
             try:
@@ -886,10 +953,9 @@ class StateServer:
             log.warning("dbt-hodor: cannot load records of %s/%s: %s", *key, found["error"])
             raise unavailable(f"cannot read records: {found['error']}")
         records: dict[str, Record] = dict(found["records"])
-        with self._lock:  # a record this server wrote may not be stored yet
-            for node_key, record in self._written.get(key, {}).items():
-                if _newer(records.get(node_key), record):
-                    records[node_key] = record
+        for record in waiting:  # records this server wrote that the store may not hold yet
+            if _newer(records.get(record.node_key), record):
+                records[record.node_key] = record
         return list(records.values())
 
     def _defer(self, req: Any, out_cls: Any, context: Any) -> Any:
@@ -901,7 +967,7 @@ class StateServer:
             return out_cls()
         # dbt asks once per run, and a wrong answer would read the current target's tables
         entry = self._entry((req.project_name or self.project_name, base))
-        if not entry.ready.wait(SELECTION_WAIT_S):
+        if not entry.ready.wait(STORE_WAIT_S):
             return out_cls()
         with self._lock:
             if not entry.ok:

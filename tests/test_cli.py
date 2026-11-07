@@ -81,3 +81,18 @@ def test_explain_renders_env_var_in_a_new_process(tmp_path):
     )
     # rendered: the store at CLI_STATE opens, and holds no records yet
     assert "no records for p/dev" in proc.stderr, proc.stderr[-1500:]
+
+
+def test_ddl_postgres_prints_the_lookup_index(capsys):
+    main(["ddl", "--store", "postgres", "--schema", "ops"])
+    out = capsys.readouterr().out
+    assert 'CREATE TABLE IF NOT EXISTS "ops"."hodor_state"' in out
+    assert (
+        'CREATE INDEX IF NOT EXISTS "hodor_state_lookup" ON "ops"."hodor_state" '
+        "(project_name, target_name, recorded_at_ms);"
+    ) in out
+
+
+def test_ddl_duckdb_prints_no_index(capsys):
+    main(["ddl", "--store", "duckdb"])
+    assert "INDEX" not in capsys.readouterr().out

@@ -71,7 +71,7 @@ The rules above are checked in this order; the first match decides. These codes 
 | Reason | Decision |
 | --- | --- |
 | `hodor_error` | build, after a failure inside hodor |
-| `store_slow` (dbt v2) | build, when the records are not loaded within 2 seconds |
+| `store_slow` (dbt v2) | build, when the records are not loaded within the 30 seconds shared by the run |
 | `cloned_from_base` | clone from the base target, instead of a build |
 | `pre_cloned_from_base` (dbt-core) | clone, then build on top |
 | `clone_registered` (dbt v2) | the server accepts a clone dbt asked for itself |
@@ -143,7 +143,7 @@ Each store has its own page: [State stores](docs/stores/index.md).
 | `delta` | `<hodor_database>.<hodor_schema>.<hodor_table>` | the table only. The schema must exist, because creating one needs catalog-level grants |
 | `trino` | `<hodor_database>.<hodor_schema>.<hodor_table>` in a Trino catalog | the table only. The schema must exist |
 | `duckdb` | table `<hodor_schema>.<hodor_table>` in the file `hodor_path` | the file, the schema and the table |
-| `postgres` (alias `lakebase`) | `<hodor_schema>.<hodor_table>` in the Postgres database `hodor_database` | the schema and the table |
+| `postgres` (alias `lakebase`) | `<hodor_schema>.<hodor_table>` in the Postgres database `hodor_database` | the schema, the table and a lookup index (see [Postgres](docs/stores/postgres.md)) |
 
 `delta` and `trino` have no default schema on purpose: hodor writes nothing to a catalog until someone names the schema. Without it, hodor turns itself off with a warning.
 

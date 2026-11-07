@@ -769,8 +769,7 @@ def test_selection_fails_the_run_when_records_cannot_be_read(serve):
 
 
 def test_selection_waits_for_the_load_and_fails_on_timeout(serve, monkeypatch):
-    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.05)
-    monkeypatch.setattr(server_mod, "SELECTION_WAIT_S", 0.3)
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.3)
     release = threading.Event()
 
     def hanging():
@@ -788,9 +787,7 @@ def test_selection_waits_for_the_load_and_fails_on_timeout(serve, monkeypatch):
         release.set()
 
 
-def test_selection_waits_past_the_decision_wait(serve, monkeypatch):
-    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.05)
-
+def test_selection_waits_for_a_slow_store(serve):
     def slow():
         time.sleep(0.5)
         return Store()
@@ -837,22 +834,19 @@ def test_defer_defers_nothing_when_the_store_is_down(serve):
     assert _defer(c, ["model.p.stg_orders"]) == {}
 
 
-def test_defer_waits_past_the_decision_wait_for_the_base_records(serve, monkeypatch):
-    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.05)
-
+def test_defer_waits_for_the_base_records(serve):
     class Slow(Store):
         def load(self, *args, **kwargs):
             time.sleep(0.6)
             return super().load(*args, **kwargs)
 
     _, c = serve(Slow)
-    _build_prod(c)  # the decisions do not wait that long: they build
+    _build_prod(c)
     assert _defer(c, ["model.p.stg_orders"]) == {"model.p.stg_orders": TARGET}
 
 
 def test_defer_answers_nothing_when_the_records_stay_away(serve, monkeypatch):
-    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.05)
-    monkeypatch.setattr(server_mod, "SELECTION_WAIT_S", 0.3)
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.3)
 
     class Hung(Store):
         def load(self, *args, **kwargs):
@@ -1066,3 +1060,357 @@ def test_an_upstream_two_nodes_claim_does_not_clone(serve):
     _build(c, other, RAW_EPOCH)
     _session(c, "prod")
     assert _no_clone(c, _dev_req()) == "ready_to_execute"
+
+
+# -- one wait budget, store retry, reload per run, invocation ids --------------------------
+
+VALIDATE = validation_pb2.ValidateClientVersionRequest(dbt_run_cache_version="2.0.8")
+
+
+class Hung(Store):
+    """A store whose reads wait for `release`."""
+
+    release = None
+
+    def load(self, *args, **kwargs):
+        self.release.wait(10)
+        return super().load(*args, **kwargs)
+
+
+def _hung(release):
+    return type("HungStore", (Hung,), {"release": release})
+
+
+def test_a_slow_store_under_the_wait_never_answers_store_slow(serve, monkeypatch):
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 10.0)
+
+    class Slow(Store):
+        def load(self, *args, **kwargs):
+            time.sleep(0.4)
+            return super().load(*args, **kwargs)
+
+    _, c = serve(Slow)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    for i in range(6):
+        resp = c.sql.SubmitEnrichedSQL(sql_req(target=f"`cat`.`sch`.`m{i}`"), timeout=5)
+        assert _decided(resp) == "no_history"
+
+
+def test_a_hung_store_delays_a_run_once(serve, monkeypatch):
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.4)
+    release = threading.Event()
+    _, c = serve(_hung(release))
+    try:
+        c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+        start = time.monotonic()
+        for i in range(6):
+            resp = c.sql.SubmitEnrichedSQL(sql_req(target=f"`cat`.`sch`.`m{i}`"), timeout=5)
+            assert _decided(resp) == "store_slow"
+        # one budget for all of them, not 6 x 0.4 s
+        assert time.monotonic() - start < 0.4 + 0.5
+    finally:
+        release.set()
+
+
+def test_the_deadline_is_kept_while_a_load_is_retried(serve, monkeypatch):
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.4)
+
+    class Failing(Store):
+        def load(self, *args, **kwargs):
+            time.sleep(0.15)
+            raise OSError("read failed")
+
+    _, c = serve(Failing)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    start = time.monotonic()
+    reasons = [_decided(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) for _ in range(6)]
+    assert set(reasons) <= {"hodor_error", "store_slow"}
+    assert time.monotonic() - start < 0.4 + 0.5
+
+
+def test_the_clone_check_does_not_wait_past_the_requests_own_budget(serve, monkeypatch):
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.5)
+    release = threading.Event()
+
+    class Mixed(Store):
+        def load(self, project, target, *args, **kwargs):
+            if target == "prod":
+                release.wait(10)
+            else:
+                time.sleep(0.3)
+            return super().load(project, target, *args, **kwargs)
+
+    _, c = serve(Mixed, allow_clones=True)
+    try:
+        c.validation.ValidateClientVersion(VALIDATE, metadata=INV, timeout=5)
+        _session(c, "prod")
+        start = time.monotonic()
+        resp = c.sql.SubmitEnrichedSQL(_dev_req(), metadata=INV, timeout=5)
+        assert _kind(resp) == "ready_to_execute"
+        # 0.3 s for the dev records, then at most the rest of 0.5 s for prod's
+        assert time.monotonic() - start < 0.7
+    finally:
+        release.set()
+
+
+def test_a_failed_store_open_is_tried_again_on_the_next_run(serve):
+    store = Store()
+    calls = []
+
+    def factory():
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("not yet")
+        return store
+
+    _, c = serve(factory)
+    assert _decided(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "hodor_error"
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    first = c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)
+    assert _decided(first) == "no_history"
+    c.execution.ConfirmExecution(confirm(TARGET_EPOCH)(first.ready_to_execute.request_id))
+    assert _kind(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "skip_execution"
+    assert len(calls) == 2
+
+
+class _Alias:
+    """The same store for a second server, which must not close it."""
+
+    def __init__(self, store):
+        self._store = store
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+    def close(self):
+        pass
+
+
+def test_records_another_writer_stored_count_from_the_next_run(serve):
+    store, factory = _store_factory()
+    _, a = serve(factory)
+    a.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    assert _decided(a.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "no_history"
+    other, b = serve(lambda: _Alias(store))
+    _build(b, sql_req(), TARGET_EPOCH)
+    other.stop()  # flushes its build record into the shared store
+    # still the same run: A answers from the records it loaded
+    assert _decided(a.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "no_history"
+    a.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    assert _kind(a.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "skip_execution"
+
+
+def test_a_record_still_queued_survives_the_reload(serve):
+    class SlowAppend(Store):
+        def append(self, records):
+            time.sleep(0.8)
+            super().append(records)
+
+    _, c = serve(SlowAppend)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    _build(c, sql_req(), TARGET_EPOCH)  # the writer is still busy with this record
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    assert _kind(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "skip_execution"
+
+
+def test_a_reload_that_fails_builds_instead_of_using_the_old_records(serve):
+    failing = []
+
+    class Flaky(Store):
+        def load(self, *args, **kwargs):
+            if failing:
+                raise OSError("read failed")
+            return super().load(*args, **kwargs)
+
+    _, c = serve(Flaky)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    _build(c, sql_req(), TARGET_EPOCH)
+    assert _kind(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "skip_execution"
+    failing.append(1)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    resp = c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)
+    assert (_kind(resp), _decided(resp)) == ("ready_to_execute", "hodor_error")
+
+
+def test_a_reload_that_hangs_builds_instead_of_using_the_old_records(serve, monkeypatch):
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.3)
+    release = threading.Event()
+    hang = []
+
+    class Slow(Store):
+        def load(self, *args, **kwargs):
+            if hang:
+                release.wait(10)
+            return super().load(*args, **kwargs)
+
+    _, c = serve(Slow)
+    try:
+        c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+        _build(c, sql_req(), TARGET_EPOCH)
+        hang.append(1)
+        c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+        assert _decided(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "store_slow"
+    finally:
+        release.set()
+
+
+def test_overlapping_invocations_keep_their_own_ids(serve):
+    store, factory = _store_factory()
+    srv, c = serve(factory)
+    a, b = ((("x-dbt-invocation-id", i),) for i in ("inv-a", "inv-b"))
+    c.validation.ValidateClientVersion(VALIDATE, metadata=a, timeout=5)
+    c.validation.ValidateClientVersion(VALIDATE, metadata=b, timeout=5)
+    raw = sql_req(target=RAW, sql="select 1 as id")
+    one = c.sql.SubmitEnrichedSQL(raw, metadata=a, timeout=5)
+    two = c.sql.SubmitEnrichedSQL(sql_req(), metadata=b, timeout=5)
+    c.execution.ConfirmExecution(confirm(RAW_EPOCH)(one.ready_to_execute.request_id), metadata=a)
+    c.execution.ConfirmExecution(confirm(TARGET_EPOCH)(two.ready_to_execute.request_id), metadata=b)
+    req = execution_service_pb2.RecordExecutionsRequest(
+        records=[_execution(sql_req(), TARGET_EPOCH)]
+    )
+    c.execution.RecordExecutions(req, metadata=a, timeout=5)
+    # a seed table rewritten outside dbt is marked stale under the request's invocation
+    seed = c.sql.SubmitValues(seed_req(), metadata=a, timeout=5)
+    c.execution.ConfirmExecution(confirm(SEED_EPOCH)(seed.ready_to_execute.request_id), metadata=a)
+    c.sql.SubmitEnrichedSQL(
+        sql_req(extra=[_table(SEED, SEED_EPOCH + 5_000)]), metadata=b, timeout=5
+    )
+    srv.stop()
+    ids = {(r.node_key, r.action): r.invocation_id for r in store.appended}
+    assert ids[("cat.sch.raw_orders", "build")] == "inv-a"
+    assert ids[("cat.sch.seed_codes", "build")] == "inv-a"
+    assert ids[("cat.sch.seed_codes", "stale")] == "inv-b"
+    stg = sorted(r.invocation_id for r in store.appended if r.node_key == "cat.sch.stg_orders")
+    assert stg == ["inv-a", "inv-b"]  # the recorded execution and the confirmed build
+
+
+def test_without_an_invocation_header_the_validation_id_is_used(serve):
+    store, factory = _store_factory()
+    srv, c = serve(factory)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    _build(c, sql_req(), TARGET_EPOCH)
+    srv.stop()
+    assert [r.invocation_id for r in store.appended] == [srv._invocation]
+
+
+@pytest.mark.parametrize("reason", ["hodor_error", "store_slow"])
+def test_explain_does_not_claim_a_missing_record_when_none_were_read(serve, monkeypatch, reason):
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 0.1)
+    release = threading.Event()
+
+    def broken():
+        raise OSError("no such store")
+
+    _, c = serve(broken if reason == "hodor_error" else _hung(release))
+    try:
+        resp = c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)
+        assert _decided(resp) == reason
+        rid = resp.ready_to_execute.request_id
+        req = explain_service_pb2.GetExplainMessagesRequest(execution_decision_ids=[rid])
+        (message,) = c.explain.GetExplainMessages(req, timeout=5).messages
+        assert [line.text for line in message.explain_lines] == [f"records not loaded: {reason}"]
+    finally:
+        release.set()
+
+
+# -- the unflushed overlay, a down store, a fast stop -------------------------------------
+
+
+def _flushed(srv, timeout=5.0):
+    """Wait until the writer has stored (or dropped) every record this server queued."""
+    end = time.monotonic() + timeout
+    while srv._unflushed and time.monotonic() < end:
+        time.sleep(0.01)
+    assert not srv._unflushed
+
+
+def test_a_write_racing_an_entry_replacement_keeps_the_record(serve, record):
+    srv, c = serve()
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    key = ("p", "dev")
+    srv._records(key)
+    entered = srv._entry
+
+    def replaced(k):
+        entered(k)
+        with srv._lock:
+            srv._loads[k].stale = True  # a new run begins between look-up and use
+        return entered(k)
+
+    srv._entry = replaced
+    rec = record(project_name="p", target_name="dev", node_key="cat.sch.x", recorded_at_ms=2**41)
+    srv._write(rec)
+    with srv._lock:
+        assert srv._loads[key].builds["cat.sch.x"] is rec
+
+
+def test_a_record_deleted_from_the_store_is_gone_after_the_reload(serve):
+    store, factory = _store_factory()
+    srv, c = serve(factory)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    _build(c, sql_req(), TARGET_EPOCH)
+    _flushed(srv)
+    assert _kind(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "skip_execution"
+    store.prune("p", "dev", 2**62, True)  # pruned, or deleted by hand
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    assert _decided(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "no_history"
+
+
+def test_a_record_older_than_the_lookback_is_not_kept_across_a_reload(serve, monkeypatch):
+    _, factory = _store_factory()
+    srv, c = serve(factory, lookback_days=90)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    _build(c, sql_req(), TARGET_EPOCH)
+    _flushed(srv)
+    now = server_mod.now_ms
+    monkeypatch.setattr(server_mod, "now_ms", lambda: now() + 100 * server_mod.DAY_MS)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    assert _decided(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "no_history"
+
+
+def test_a_stored_record_leaves_the_unflushed_set(serve):
+    class SlowAppend(Store):
+        def append(self, records):
+            time.sleep(0.5)
+            super().append(records)
+
+    srv, c = serve(SlowAppend)
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    _build(c, sql_req(), TARGET_EPOCH)
+    with srv._lock:
+        assert len(srv._unflushed) == 1
+    _flushed(srv)
+
+
+def test_a_down_store_starts_one_loader_for_a_run(serve):
+    def broken():
+        raise OSError("no such store")
+
+    srv, c = serve(broken)
+    loads = []
+    inner = srv._load
+    srv._load = lambda key, entry: (loads.append(key), inner(key, entry))
+    c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+    for _ in range(10):
+        assert _decided(c.sql.SubmitEnrichedSQL(sql_req(), timeout=5)) == "hodor_error"
+    assert loads == [("p", "dev")]
+
+
+def test_stop_does_not_wait_for_requests_blocked_on_the_store(serve, monkeypatch):
+    monkeypatch.setattr(server_mod, "STORE_WAIT_S", 20.0)
+    release = threading.Event()
+    srv, c = serve(_hung(release))
+    try:
+        c.validation.ValidateClientVersion(VALIDATE, timeout=5)
+        pending = c.sql.SubmitEnrichedSQL.future(sql_req(), timeout=30)
+        time.sleep(0.5)  # the decision is now waiting for the records
+        stopper = threading.Thread(target=srv.stop)
+        stopper.start()
+        time.sleep(3.0)  # the store is still hung
+        handlers = [t for t in threading.enumerate() if t.name.startswith("hodor-rpc")]
+        assert not [t for t in handlers if t.is_alive()]
+        pending.cancel()
+    finally:
+        release.set()
+    stopper.join(15)
+    assert not stopper.is_alive()

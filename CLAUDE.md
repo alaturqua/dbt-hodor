@@ -2,16 +2,15 @@
 
 ## Working in Claude Code
 
-The main session coordinates: it plans, decides and answers. Delegate the rest to the
-user-level agents, cheapest first, and run independent tasks in parallel:
+Work inline by default. Spawn an agent only when it pays for its cold start:
 
-- `Explore`: find files, symbols and usages.
-- `runner`: pytest, ruff, mkdocs build; returns failures only.
-- `implementer`: scoped edits once the approach is decided.
-- `reviewer`: read-only review of the diff before a commit.
-- `deep-debugger`: only after a cheaper attempt failed or the cause is unclear.
+- `runner`: full pytest, mkdocs build or other long output; returns failures only.
+- `reviewer`: fresh-eyes review of the final diff before a commit.
+- `Explore`: broad searches spanning many files; not for one-symbol lookups.
+- Several independent tasks that can run in parallel.
 
-Give each agent the file paths and the check to run, so it does not re-explore.
+Debug with the `superpowers:systematic-debugging` skill inline. When you do spawn an
+agent, give it the file paths and the check to run, so it does not re-explore.
 
 Skills: `karpathy-guidelines` for every code change, `dbt-state-alternative-build` for
 hodor settings and dbt flags, `git-workflow-and-versioning` for commits, branches and
