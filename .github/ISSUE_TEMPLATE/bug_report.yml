@@ -40,7 +40,7 @@ body:
     attributes:
       label: Versions
       description: dbt-hodor, dbt-core and the adapter with its version.
-      placeholder: dbt-hodor 0.1.0, dbt-core 1.12.5, dbt-databricks 1.12.7
+      placeholder: dbt-hodor 0.1.0, dbt-core 1.12.6, dbt-databricks 1.13.0
     validations:
       required: true
 

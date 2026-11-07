@@ -1,6 +1,6 @@
 # Trino
 
-hodor on `dbt-trino`, tested with `dbt-trino` 1.10.6. The Iceberg connector was tested live on Trino 476 in Docker; the Delta Lake connector is covered by unit tests only.
+hodor on `dbt-trino`, tested with `dbt-trino` 1.11.0. The Iceberg connector was tested live on Trino 476 in Docker; the Delta Lake connector is covered by unit tests only.
 
 ## Install
 
