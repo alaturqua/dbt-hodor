@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 DEFAULT_LAG_TOLERANCE_S = 45 * 60
+DAY_MS = 86_400_000  # hodor_lookback_days is in days, records are in milliseconds
 
 _UNIT_SECONDS = {
     "s": 1,
@@ -49,6 +50,7 @@ _SETTING_NAMES = (
     "path",
     "metadata_threads",
     "lookback_days",
+    "auto_prune",
     "host",
     "port",
     "user",
@@ -157,6 +159,7 @@ class Settings:
     path: str = ".hodor/state.duckdb"  # duckdb store file
     metadata_threads: int = 8
     lookback_days: int = 90
+    auto_prune: bool = False  # delete records older than lookback_days at the end of a run
     # postgres store. endpoint is a Lakebase endpoint path: it supplies host, user and the
     # OAuth token, so host, user and password stay empty for Lakebase.
     host: str | None = None
@@ -318,6 +321,12 @@ def load_settings(
             raw, "metadata_threads", defaults.metadata_threads, 1, 64, warn
         ),
         lookback_days=_int_setting(raw, "lookback_days", defaults.lookback_days, 1, 3650, warn),
+        auto_prune=_bool_setting(
+            {"hodor_auto_prune": raw["auto_prune"]} if "auto_prune" in raw else {},
+            "hodor_auto_prune",
+            defaults.auto_prune,
+            warn,
+        ),
         host=host,
         port=_int_setting(raw, "port", defaults.port, 1, 65535, warn),
         user=str(raw["user"]) if raw.get("user") else None,

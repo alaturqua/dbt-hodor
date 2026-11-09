@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 # (name, kind) in table order. kind is "text" or "bigint"; JSON is stored as text.
@@ -105,6 +105,24 @@ class Record:
             if values[name] is not None:
                 values[name] = int(values[name])  # type: ignore[call-overload]
         return cls(**values)  # type: ignore[arg-type]
+
+
+def newer(current: Record | None, record: Record) -> bool:
+    """Whether `record` replaces `current` as the newest: later, or the same time and a
+    record id that sorts after it."""
+    return current is None or (current.recorded_at_ms, current.record_id) <= (
+        record.recorded_at_ms,
+        record.record_id,
+    )
+
+
+def by_unique_id(records: Iterable[Record]) -> dict[str, Record]:
+    """The newest record per unique_id. Records are keyed by relation, which can change."""
+    out: dict[str, Record] = {}
+    for record in records:
+        if newer(out.get(record.unique_id), record):
+            out[record.unique_id] = record
+    return out
 
 
 def create_table_sql(table: str, dialect: str) -> str:

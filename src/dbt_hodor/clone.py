@@ -9,6 +9,7 @@ from .engine import BUILD, CODE_PREFIX, VOLATILE_PREFIX, Decision, NodeFacts
 from .lineage import normalize_relation
 from .records import CARRY, SUCCESS_STATUSES, Record
 
+CLONE = "clone"  # action of a record of a table cloned from the base target
 CLONED = "cloned_from_base"  # clone, nothing more to run
 PRE_CLONED = "pre_cloned_from_base"  # clone, then run the model on top (pre_clone)
 # builds that must stay builds: the run asked for a rebuild, or hodor failed

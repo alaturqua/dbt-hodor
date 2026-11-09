@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 from .records import Record
 
-NodeHashes = Mapping[str, str | None]
+NodeHashes = Mapping[str, object]
 
 # criterion -> key in `node_hashes`
 SUB_CRITERIA = {

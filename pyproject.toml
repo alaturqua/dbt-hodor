@@ -1,6 +1,6 @@
 [project]
 name = "dbt-hodor"
-version = "0.4.1"
+version = "0.5.0"
 description = "Reuse unchanged dbt nodes and rebuild only when code or upstream data changed. A free, self-hosted alternative to dbt State."
 readme = "README.md"
 license = "Apache-2.0"
@@ -9,14 +9,27 @@ authors = [
     { name = "Isa Inalcik" }
 ]
 requires-python = ">=3.10"
+keywords = ["dbt", "dbt-core", "state", "databricks", "snowflake", "trino", "duckdb"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
+    "Topic :: Database",
+    "Typing :: Typed",
 ]
 dependencies = [
     "dbt-core>=1.12,<1.13",
     "sqlglot>=30.22,<31",
 ]
+
+[project.urls]
+Documentation = "https://alaturqua.github.io/dbt-hodor/"
+Repository = "https://github.com/alaturqua/dbt-hodor"
+Issues = "https://github.com/alaturqua/dbt-hodor/issues"
+Changelog = "https://github.com/alaturqua/dbt-hodor/blob/main/CHANGELOG.md"
 
 [project.scripts]
 dbt-hodor = "dbt_hodor.cli:main"
@@ -63,6 +76,20 @@ extend-exclude = ["src/dbt_hodor/v2/proto"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.mypy]
+files = ["src/dbt_hodor"]
+exclude = ["src/dbt_hodor/v2/proto/"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# generated protobuf modules build their classes at import: mypy sees none of them
+module = ["dbt_hodor.v2.server", "dbt_hodor.v2.mapping"]
+disable_error_code = ["attr-defined"]
+
+[[tool.mypy.overrides]]
+module = ["dbt_hodor.v2.proto.*"]
+ignore_errors = true
+
 [dependency-groups]
 dev = [
     "dbt-databricks==1.13.0",
@@ -76,6 +103,7 @@ dev = [
     "protobuf>=6.33.5",
     "pytest>=9.1.1",
     "ruff>=0.17.1",
+    "mypy>=1.18",
 ]
 docs = [
     "mkdocs>=1.6,<2",

@@ -10,7 +10,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
-from dbt_hodor.config import IDENT_RE, WAREHOUSE_STORES
+from dbt_hodor.config import DAY_MS, IDENT_RE, WAREHOUSE_STORES
 from dbt_hodor.records import create_table_sql, lookup_index_sql
 
 
@@ -57,7 +57,7 @@ def _open_store(
     from dbt_common.context import set_invocation_context
 
     from dbt_hodor.config import load_settings
-    from dbt_hodor.runtime import _profile_settings, open_store
+    from dbt_hodor.session import _profile_settings, open_store
     from dbt_hodor.store import StoreError
 
     # unset options keep dbt's defaults and DBT_PROJECT_DIR, DBT_PROFILES_DIR, DBT_TARGET
@@ -91,7 +91,6 @@ def _open_store(
 
 def _explain(args: argparse.Namespace) -> str:
     from dbt_hodor.explain import render, render_summary, report, summarize
-    from dbt_hodor.runtime import DAY_MS
     from dbt_hodor.store import StoreError
 
     settings, store, project, target = _open_store(args)
@@ -121,7 +120,6 @@ def _explain(args: argparse.Namespace) -> str:
 
 
 def _prune(args: argparse.Namespace) -> str:
-    from dbt_hodor.runtime import DAY_MS
     from dbt_hodor.store import StoreError
 
     settings, store, project, target = _open_store(args, "prune", read_only=not args.yes)
@@ -167,36 +165,6 @@ def _project_identity(project_dir: str) -> tuple[str, str | None]:
     return str(name), None if project_id is None else str(project_id)
 
 
-def _server_store(settings: Any, project_dir: str) -> Any:
-    """The duckdb or postgres store, opened as a dbt run opens it (the server has no dbt-core
-    profile, so settings come from flags and HODOR_* env vars)."""
-    if settings.store == "duckdb":
-        from dbt_hodor.store.duckdb import DuckDBStore
-
-        path = settings.path
-        if path != ":memory:" and not os.path.isabs(path):
-            path = os.path.join(project_dir, path)
-        return DuckDBStore(path, settings.schema or "main", settings.table)
-    from dbt_hodor.store.postgres import PostgresStore, lakebase_target
-
-    host, user, credential = settings.host, settings.user, None
-    if settings.endpoint:  # Lakebase: the endpoint supplies host, user and the token
-        host, user, credential = lakebase_target(settings.endpoint)
-    if credential is None:
-        password = settings.password or ""
-        credential = lambda: password  # noqa: E731 - a plain Postgres password
-    return PostgresStore(
-        settings.database,
-        settings.schema,
-        settings.table,
-        host,
-        settings.port,
-        user or "",
-        credential,
-        settings.sslmode,
-    )
-
-
 def _wait_for_interrupt(server: Any) -> None:
     try:
         while True:
@@ -230,6 +198,7 @@ def _serve(args: argparse.Namespace) -> int:
     import importlib.util
 
     from dbt_hodor.config import load_settings
+    from dbt_hodor.store import open_local_store
 
     if importlib.util.find_spec("grpc") is None:
         print("dbt-hodor serve needs the v2 extra: pip install 'dbt-hodor[v2]'", file=sys.stderr)
@@ -253,7 +222,7 @@ def _serve(args: argparse.Namespace) -> int:
             "HODOR_SCHEMA and HODOR_HOST or HODOR_ENDPOINT"
         )
     server = StateServer(
-        lambda: _server_store(settings, project_dir),
+        lambda: open_local_store(settings, project_dir),
         project_name,
         project_id,
         args.port,

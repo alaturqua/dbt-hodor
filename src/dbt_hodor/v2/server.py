@@ -30,12 +30,14 @@ import grpc
 from google.protobuf import json_format, message_factory
 
 from .. import __version__
-from ..clone import CLONED, may_clone, node_upstreams, relation_ids
-from ..config import BaseTarget, NodeStateConfig
+from ..clone import CLONE, CLONED, may_clone, node_upstreams, relation_ids
+from ..config import DAY_MS, BaseTarget, NodeStateConfig
 from ..defer import deferred_relations
 from ..engine import BUILD, REUSE, Decision, NodeFacts, decide, upstream_versions
 from ..hashing import SqlAnalysis, normalize_runtime_values, text_hash
 from ..records import CARRY, REUSED, SUCCESS_STATUSES, Record
+from ..records import by_unique_id as _by_unique_id
+from ..records import newer as _newer
 from ..selection import SUB_CRITERIA, select
 from ..store import StateStore
 from . import SUPPORTED_CLIENT_VERSIONS
@@ -86,11 +88,8 @@ KEEP_SESSIONS = 64
 _INVOCATION_HEADER = "x-dbt-invocation-id"
 # How long a decision is kept for its ConfirmExecution and for GetExplainMessages.
 KEEP_MS = 6 * 3600 * 1000
-DAY_MS = 86_400_000
 # Action of a record that marks a seed's table as written outside its builds.
 STALE = "stale"
-# Action of a record of a table cloned from the base target.
-CLONE = "clone"
 _STOP = object()
 _FLUSH_TIMEOUT_S = 10.0
 
@@ -151,15 +150,6 @@ class _Pending:
     clone: bool = False  # answered ready_to_clone
 
 
-def _by_unique_id(records: Any) -> dict[str, Record]:
-    """The newest record per unique_id. Records are keyed by relation, which can change."""
-    out: dict[str, Record] = {}
-    for record in records:
-        if _newer(out.get(record.unique_id), record):
-            out[record.unique_id] = record
-    return out
-
-
 def _invocation_id(context: Any) -> str:
     for key, value in context.invocation_metadata() or ():
         if key == _INVOCATION_HEADER:
@@ -176,13 +166,6 @@ def _unable_to_clone(req: Any, reason: str, out_cls: Any) -> Any:
         ),
     )
     return out_cls(unable_to_clone=unable)
-
-
-def _newer(current: Record | None, record: Record) -> bool:
-    return current is None or (current.recorded_at_ms, current.record_id) <= (
-        record.recorded_at_ms,
-        record.record_id,
-    )
 
 
 def _explain_lines(
@@ -596,9 +579,9 @@ class StateServer:
         asked = time.monotonic()
         state = req.dbt_node_state if req.HasField("dbt_node_state") else None
         if state is None or not req.target_table:
-            decision = Decision(BUILD, "unsupported")
-            self._remember_explain(request_id, decision, [], started)
-            return answer(decision, request_id, None, out_cls)
+            unsupported = Decision(BUILD, "unsupported")
+            self._remember_explain(request_id, unsupported, [], started)
+            return answer(unsupported, request_id, None, out_cls)
         key = (state.project_name or self.project_name, state.target_name)
         node_key = normalize(req.target_table)
         dbt_invocation = _invocation_id(context)

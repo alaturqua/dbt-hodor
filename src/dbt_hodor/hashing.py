@@ -13,6 +13,9 @@ from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.qualify import qualify
 
 HASH_VERSION = "2"
+# Version of the SQL facts a record caches (tables, select-star, volatile classes). Part of
+# the fast-path key only: a change makes every node's SQL parse again, not build again.
+FACTS_VERSION = "2"
 INVOCATION_PLACEHOLDER = "__hodor_invocation_id__"
 RUN_STARTED_PLACEHOLDER = "__hodor_run_started_at__"
 
@@ -54,8 +57,9 @@ def normalize_runtime_values(
 
 
 def text_hash(normalized_sql: str) -> str:
-    """Fast-path key. Includes HASH_VERSION so an algorithm change invalidates stored facts."""
-    return _sha(f"{HASH_VERSION}\0{normalized_sql}")
+    """Fast-path key. Includes HASH_VERSION and FACTS_VERSION, so a change of the algorithm
+    or of the analysis invalidates stored facts."""
+    return _sha(f"{HASH_VERSION}\0{FACTS_VERSION}\0{normalized_sql}")
 
 
 @dataclass(frozen=True)
@@ -119,8 +123,10 @@ class SqlAnalysis:
 
 
 # Volatile SQL functions, by the value that decides their result.
-# always: changes on every call. date: the warehouse's current date.
-# session: who runs the query and where (user, groups, catalog, schema, time zone, version).
+# always: changes on every call, or depends on a value hodor does not read (a sequence, a
+# session variable, the roles of the session). date: the warehouse's current date.
+# session: who runs the query and where (user, groups, catalog, schema, time zone, version;
+# role, warehouse, account and region on Snowflake).
 VOLATILE_CLASSES = ("always", "date", "session")
 _VOLATILE_TYPES: dict[str, tuple[type[exp.Expr], ...]] = {
     cls: tuple(t for t in (getattr(exp, name, None) for name in names) if isinstance(t, type))
@@ -130,6 +136,18 @@ _VOLATILE_TYPES: dict[str, tuple[type[exp.Expr], ...]] = {
             "CurrentTime",
             "CurrentDatetime",
             "Localtimestamp",
+            "Localtime",
+            "Seq1",
+            "Seq2",
+            "Seq4",
+            "Seq8",
+            "CurrentSession",
+            "CurrentStatement",
+            "CurrentTransaction",
+            "CurrentClient",
+            "CurrentIpAddress",
+            "CurrentAvailableRoles",
+            "CurrentSecondaryRoles",
             "Rand",
             "Randn",
             "Uuid",
@@ -144,6 +162,12 @@ _VOLATILE_TYPES: dict[str, tuple[type[exp.Expr], ...]] = {
             "CurrentSchema",
             "CurrentTimezone",
             "CurrentVersion",
+            "CurrentRole",
+            "CurrentWarehouse",
+            "CurrentAccount",
+            "CurrentAccountName",
+            "CurrentOrganizationName",
+            "CurrentRegion",
         ),
     }.items()
 }
@@ -157,6 +181,31 @@ _VOLATILE_NAMES = {
     "monotonically_increasing_id": "always",
     "random_uuid": "always",
     "uuid": "always",
+    "localtime": "always",
+    "current_localtime": "always",
+    "get_current_timestamp": "always",
+    "transaction_timestamp": "always",
+    "nextval": "always",
+    "currval": "always",
+    "txid_current": "always",
+    "current_query": "always",
+    "current_setting": "always",
+    "getenv": "always",
+    "getvariable": "always",
+    "input_file_name": "always",
+    "input_file_block_start": "always",
+    "input_file_block_length": "always",
+    "spark_partition_id": "always",
+    "reflect": "always",
+    "try_reflect": "always",
+    "java_method": "always",
+    "current_recipient": "always",
+    "current_groups": "always",
+    "is_role_in_session": "always",
+    "invoker_role": "always",
+    "invoker_share": "always",
+    "last_query_id": "always",
+    "last_transaction": "always",
     "today": "date",
     "curdate": "date",
     "user": "session",

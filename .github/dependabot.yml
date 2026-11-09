@@ -28,3 +28,5 @@ updates:
       - dependency-name: dbt-core
       - dependency-name: dbt-databricks
       - dependency-name: dbt-duckdb
+      - dependency-name: dbt-trino
+      - dependency-name: dbt-snowflake

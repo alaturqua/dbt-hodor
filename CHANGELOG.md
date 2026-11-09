@@ -5,6 +5,13 @@ and the project follows [semantic versioning](https://semver.org).
 
 Until 1.0 the settings and the record schema may change in a minor release.
 
+## Unreleased
+
+### Correctness: reuse decisions
+
+- **reuse**: See more volatile functions and Delta column changes ([#30](https://github.com/alaturqua/dbt-hodor/issues/30))
+
+
 ## [0.4.1] - 2026-11-07
 
 ### Bug fixes

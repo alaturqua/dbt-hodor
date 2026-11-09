@@ -22,7 +22,8 @@ class DataVersion:
 
 UNKNOWN = DataVersion(None)
 
-# Delta operations that never change the data a table holds.
+# Delta operations that never change the data a table holds. CHANGE COLUMN is not one: it is
+# a column comment, but also a widened type or a moved column, which a `select *` reads.
 NON_DATA_OPERATIONS = frozenset(
     {
         "OPTIMIZE",
@@ -32,7 +33,6 @@ NON_DATA_OPERATIONS = frozenset(
         "COMPUTE STATS",
         "SET TBLPROPERTIES",
         "UNSET TBLPROPERTIES",
-        "CHANGE COLUMN",
         "ADD CONSTRAINT",
         "DROP CONSTRAINT",
         "UPGRADE PROTOCOL",

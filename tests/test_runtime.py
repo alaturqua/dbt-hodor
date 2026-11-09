@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dbt_hodor import providers, runtime
+from dbt_hodor import base_target, providers, runtime
 from dbt_hodor.runtime import Runtime, model_kind, seed_hash
 from dbt_hodor.store.delta import DeltaStore
 from dbt_hodor.store.trino import TrinoStore
@@ -400,15 +400,15 @@ def test_node_hashes_that_fail_leave_the_record_without_hashes():
 def _selection(monkeypatch, profile, store, b_config=None):
     from dbt.artifacts.resources import ModelConfig
 
-    monkeypatch.setattr(runtime, "_profile_settings", lambda config: profile)
-    monkeypatch.setattr(runtime, "open_store", store)
-    monkeypatch.setattr(runtime, "get_adapter", lambda config: SimpleNamespace())
+    monkeypatch.setattr(base_target, "_profile_settings", lambda config: profile)
+    monkeypatch.setattr(base_target, "open_store", store)
+    monkeypatch.setattr(base_target, "get_adapter", lambda config: SimpleNamespace())
     config = SimpleNamespace(
         project_name="p", target_name="dev", credentials=SimpleNamespace(type="duckdb")
     )
     b = _model(unique_id="model.p.b", config=b_config or ModelConfig(materialized="table"))
     nodes = [("model.p.a", _model()), ("model.p.b", b)]
-    return runtime.state_selection(config, SimpleNamespace(macros=MACROS), "modified", nodes)
+    return base_target.state_selection(config, SimpleNamespace(macros=MACROS), "modified", nodes)
 
 
 @pytest.mark.parametrize("node_base", ["prod", None])
@@ -507,16 +507,16 @@ class _Node:
 def _defer(monkeypatch, profile, store, nodes, selected=()):
     from dbt.adapters.base.relation import BaseRelation
 
-    monkeypatch.setattr(runtime, "_profile_settings", lambda config: profile)
-    monkeypatch.setattr(runtime, "open_store", store)
+    monkeypatch.setattr(base_target, "_profile_settings", lambda config: profile)
+    monkeypatch.setattr(base_target, "open_store", store)
     connections = SimpleNamespace(get_if_exists=lambda: None)
     adapter = SimpleNamespace(Relation=BaseRelation, connections=connections)
-    monkeypatch.setattr(runtime, "get_adapter", lambda config: adapter)
+    monkeypatch.setattr(base_target, "get_adapter", lambda config: adapter)
     config = SimpleNamespace(
         project_name="p", target_name="dev", credentials=SimpleNamespace(type="duckdb"), quoting={}
     )
     manifest = SimpleNamespace(nodes=dict(nodes))
-    return runtime.defer_to_base(config, manifest, selected), manifest.nodes
+    return base_target.defer_to_base(config, manifest, selected), manifest.nodes
 
 
 def _state(base):
@@ -599,7 +599,7 @@ def test_defer_without_another_base_target_leaves_it_to_dbt(monkeypatch, profile
 )
 def test_defer_that_cannot_read_the_base_warns_and_leaves_it_to_dbt(monkeypatch, extra, cause):
     warnings = []
-    monkeypatch.setattr(runtime, "warn", warnings.append)
+    monkeypatch.setattr(base_target, "warn", warnings.append)
 
     def broken(*args, **kwargs):
         raise runtime.StoreError("cannot read hodor state: locked")
@@ -625,7 +625,7 @@ def test_defer_that_cannot_read_the_base_warns_and_leaves_it_to_dbt(monkeypatch,
 )
 def test_defer_that_defers_nothing_warns_once(monkeypatch, record, relations, message):
     warnings = []
-    monkeypatch.setattr(runtime, "warn", warnings.append)
+    monkeypatch.setattr(base_target, "warn", warnings.append)
 
     class Store:
         def load_latest(self, project, target, since, any_status=False):
@@ -651,7 +651,7 @@ def test_defer_patch_fallback_names_the_target(monkeypatch):
     monkeypatch.setattr(patches, "warn", warnings.append)
     monkeypatch.setitem(patches.ORIGINALS, "GraphRunnableTask._get_deferred_manifest", lambda t: 7)
     profile = {"hodor_store": "duckdb", "defer_to_target": "prod"}
-    monkeypatch.setattr(runtime, "_profile_settings", lambda config: profile)
+    monkeypatch.setattr(base_target, "_profile_settings", lambda config: profile)
     task = SimpleNamespace(
         args=SimpleNamespace(defer=True, state=None, defer_state=None),
         config=SimpleNamespace(target_name="dev", credentials=SimpleNamespace(type="duckdb")),
@@ -871,3 +871,53 @@ def test_an_incremental_whose_clone_cannot_be_dropped_fails_with_a_record(monkey
         instance._try_clone(runner, _clone_model(), None, plan, "prod.main.a")
     (record,) = instance._pending
     assert (record.action, record.status) == ("build", "error")
+
+
+class _PruneStore:
+    def __init__(self, error=None):
+        self.calls, self.error = [], error
+
+    def append(self, records):
+        self.calls.append(("append", len(records)))
+
+    def prune(self, project, target, before_ms, delete):
+        self.calls.append(("prune", project, target, before_ms, delete))
+        if self.error:
+            raise self.error
+        return 3
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+def _finishing_runtime(store, auto_prune):
+    instance = _bare_runtime()
+    instance.settings = SimpleNamespace(mode="on", lookback_days=90, auto_prune=auto_prune)
+    instance.store, instance.finished = store, False
+    instance.reused = instance.built = instance.cloned = instance.errors = 0
+    return instance
+
+
+def test_finish_prunes_records_older_than_the_lookback_window_when_asked(record, monkeypatch):
+    monkeypatch.setattr(runtime.time, "time", lambda: 1_000_000)
+    store = _PruneStore()
+    instance = _finishing_runtime(store, auto_prune=True)
+    instance._pending = [record()]
+    instance.finish()
+    before = 1_000_000_000 - 90 * runtime.DAY_MS
+    assert store.calls == [("append", 1), ("prune", "p", "prod", before, True), ("close",)]
+
+
+def test_finish_does_not_prune_by_default():
+    store = _PruneStore()
+    _finishing_runtime(store, auto_prune=False).finish()
+    assert store.calls == [("close",)]
+
+
+def test_a_failed_prune_warns_and_does_not_raise(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(runtime, "warn", warnings.append)
+    store = _PruneStore(error=runtime.StoreError("cannot prune hodor state: denied"))
+    _finishing_runtime(store, auto_prune=True).finish()
+    assert store.calls[-1] == ("close",)
+    assert warnings == ["dbt-hodor: cannot prune hodor state: denied; old records stay"]

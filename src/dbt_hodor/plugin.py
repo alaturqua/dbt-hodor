@@ -88,7 +88,7 @@ def remove_patches() -> None:
 
 class HodorPlugin(dbtPlugin):
     def initialize(self) -> None:
-        from dbt_hodor.runtime import info, warn
+        from dbt_hodor.session import info, warn
         from dbt_hodor.state_config import install_state_config_support
 
         logging.getLogger("sqlglot").setLevel(logging.ERROR)

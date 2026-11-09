@@ -117,7 +117,8 @@ class DuckDBStore:
         try:
             with self._lock:
                 count_sql = prune_sql(self._table, "?", "?", "?", delete=False)
-                count = int(self._con.execute(count_sql, params).fetchone()[0])
+                row = self._con.execute(count_sql, params).fetchone()
+                count = int(row[0]) if row else 0
                 if delete and count:
                     self._con.execute(prune_sql(self._table, "?", "?", "?", delete=True), params)
                 return count

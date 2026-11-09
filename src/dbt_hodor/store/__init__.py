@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from dbt_hodor.records import Record
+
+if TYPE_CHECKING:
+    from dbt_hodor.config import Settings
 
 
 class StoreError(Exception):
@@ -44,3 +48,38 @@ class StateStore(Protocol):
         ...
 
     def close(self) -> None: ...
+
+
+def open_local_store(settings: Settings, project_root: str, read_only: bool = False) -> StateStore:
+    """The duckdb or postgres store of these settings: the stores that need no dbt adapter.
+    A relative duckdb path is relative to the dbt project."""
+    if settings.store == "duckdb":
+        from dbt_hodor.store.duckdb import DuckDBStore
+
+        path = settings.path
+        if path != ":memory:" and not os.path.isabs(path):
+            path = os.path.join(project_root, path)
+        return DuckDBStore(path, settings.schema or "main", settings.table, read_only)
+    from dbt_hodor.store.postgres import PostgresStore, lakebase_target
+
+    if not (settings.database and settings.schema):  # load_settings turns hodor off otherwise
+        raise StoreError("the postgres store needs hodor_database and hodor_schema")
+    host, user, credential = settings.host, settings.user, None
+    if settings.endpoint:  # Lakebase: the endpoint supplies host, user and the token
+        host, user, credential = lakebase_target(settings.endpoint)
+    if credential is None:
+        password = settings.password or ""
+        credential = lambda: password  # noqa: E731 - a plain Postgres password
+    if not host:  # load_settings turns hodor off without a host or an endpoint
+        raise StoreError("the postgres store needs hodor_endpoint (Lakebase) or hodor_host")
+    return PostgresStore(
+        settings.database,
+        settings.schema,
+        settings.table,
+        host,
+        settings.port,
+        user or "",
+        credential,
+        settings.sslmode,
+        read_only,
+    )

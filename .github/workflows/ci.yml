@@ -40,10 +40,11 @@ jobs:
       - run: uv sync --group dev
       - run: uv run ruff check
       - run: uv run ruff format --check
+      - run: uv run mypy
 
   test:
     # The ends of the supported range, not every version in it: a break on 3.11 that shows on
-    # neither 3.10 nor 3.12 is not a thing that happens here. Windows is included because
+    # neither 3.10 nor 3.13 is not a thing that happens here. Windows is included because
     # hodor is developed there and paths and line endings have broken before.
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -54,7 +55,7 @@ jobs:
           - os: ubuntu-24.04
             python: "3.10"
           - os: ubuntu-24.04
-            python: "3.12"
+            python: "3.13"
           - os: windows-latest
             python: "3.12"
     steps:
@@ -100,6 +101,36 @@ jobs:
           HODOR_PG_SCHEMA: hodor_ci
           HODOR_PG_SSLMODE: disable
         run: uv run pytest -q -m postgres tests/e2e/test_postgres_state.py
+
+  trino:
+    # dbt-trino builds on an Iceberg catalog in a Trino container, with the state in DuckDB and
+    # in Trino. A step starts the container, not `services`: the catalog file comes from the
+    # checkout, and a service container starts before it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --group dev --extra duckdb
+      - name: Start Trino
+        run: |
+          docker run -d --name hodor-trino -p 8080:8080 \
+            -v "$PWD/tests/integration/trino_catalog:/etc/trino/catalog" \
+            --tmpfs /data:uid=1000 trinodb/trino:476
+          for i in $(seq 1 60); do
+            docker exec hodor-trino trino --execute "select 1" >/dev/null 2>&1 && exit 0
+            sleep 3
+          done
+          docker logs hodor-trino
+          exit 1
+      - name: Trino Iceberg end to end
+        # The test skips itself when no server answers, and a skip must not pass here.
+        run: |
+          set -o pipefail
+          uv run pytest -q -m trino tests/integration/test_trino_iceberg.py -rs | tee out.txt
+          ! grep -q "skipped" out.txt
 
   build:
     # Packaging only needs checking once a change lands, not on every push to a branch. The

@@ -8,7 +8,7 @@ This page is for dbt-core. On dbt v2, start with [dbt v2](dbt-v2.md).
 
 ## Install
 
-hodor needs Python 3.10 or newer (CI tests 3.10 and 3.12), `dbt-core` 1.12.x and `sqlglot` 30.22 or newer (below 31). dbt installs it as a plugin: dbt imports every installed `dbt_*` module that has a `plugins` attribute, so no dbt configuration is needed to load hodor.
+hodor needs Python 3.10 or newer (CI tests 3.10 and 3.13), `dbt-core` 1.12.x and `sqlglot` 30.22 or newer (below 31). dbt installs it as a plugin: dbt imports every installed `dbt_*` module that has a `plugins` attribute, so no dbt configuration is needed to load hodor.
 
 === "uv"
 
