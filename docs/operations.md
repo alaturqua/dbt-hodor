@@ -63,6 +63,8 @@ dbt-hodor prune --keep-days 30 --yes # delete anything older than 30 days
 
 Records of other projects and targets in the same table are never touched. Keeping fewer days than `hodor_lookback_days` deletes records the next run still needs, so those nodes build once with `no_history`. The dry run warns when that would happen. On Delta, run `VACUUM` yourself afterwards if you want the files reclaimed.
 
+With [`hodor_auto_prune: true`](configuration.md), every dbt-core run does the same delete when it ends, keeping `hodor_lookback_days`. It is off by default. The dbt v2 state server does not prune.
+
 On the `trino` store with an Iceberg catalog, every insert and every delete makes a snapshot, and old snapshots and small files stay until you remove them. To reclaim space, run these as a user that may alter the table:
 
 ```sql

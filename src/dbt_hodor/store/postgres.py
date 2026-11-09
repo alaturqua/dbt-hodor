@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Sequence
+from typing import Any
 
 from dbt_hodor.config import IDENT_RE
 from dbt_hodor.records import (
@@ -94,7 +95,7 @@ class PostgresStore:
         self._schema = schema
         self._name = table
         self._has_hashes = True
-        self._conninfo = {
+        self._conninfo: dict[str, Any] = {
             "dbname": database,
             "host": host,
             "port": port,

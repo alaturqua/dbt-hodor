@@ -1,6 +1,9 @@
+import hashlib
+
 import pytest
 
 from dbt_hodor.hashing import (
+    HASH_VERSION,
     INVOCATION_PLACEHOLDER,
     RUN_STARTED_PLACEHOLDER,
     SqlAnalysis,
@@ -294,6 +297,45 @@ def test_config_hash_sees_model_level_constraints():
         ("select a from c.s.t where random() < 0.1", "trino", {"always"}, set()),
         ("select a from c.s.t where uuid() is not null", "trino", {"always"}, set()),
         ("select a from c.s.t where u = current_user", "trino", {"session"}, set()),
+        ("select a from c.s.t where t > localtime", "trino", {"always"}, set()),
+        ("select a from c.s.t where contains(current_groups(), g)", "trino", {"always"}, set()),
+        # snowflake
+        ("select a from c.s.t where t > current_time()", "snowflake", {"always"}, set()),
+        ("select a, localtime() as t from c.s.t", "snowflake", set(), {"always"}),
+        ("select a from c.s.t where r = current_role()", "snowflake", {"session"}, set()),
+        ("select a from c.s.t where w = current_warehouse()", "snowflake", {"session"}, set()),
+        ("select a from c.s.t where x = current_account()", "snowflake", {"session"}, set()),
+        ("select a from c.s.t where x = current_region()", "snowflake", {"session"}, set()),
+        ("select a, seq4() + a as n from c.s.t", "snowflake", {"always"}, set()),
+        ("select a from c.s.t where is_role_in_session('X')", "snowflake", {"always"}, set()),
+        ("select a from c.s.t where r = invoker_role()", "snowflake", {"always"}, set()),
+        ("select a from c.s.t where s = current_session()", "snowflake", {"always"}, set()),
+        ("select a from c.s.t where q = last_query_id()", "snowflake", {"always"}, set()),
+        (
+            "select a from c.s.t where array_contains(r, current_available_roles())",
+            "snowflake",
+            {"always"},
+            set(),
+        ),
+        # databricks functions sqlglot keeps anonymous
+        ("select a, input_file_name() as f from c.s.t", "databricks", set(), {"always"}),
+        ("select a from c.s.t where spark_partition_id() = 0", "databricks", {"always"}, set()),
+        ("select a from c.s.t where r = current_recipient('k')", "databricks", {"always"}, set()),
+        ("select a from c.s.t where d > getvariable('cutoff')", "databricks", {"always"}, set()),
+        (
+            "select a from c.s.t where x = reflect('java.util.UUID', 'randomUUID')",
+            "databricks",
+            {"always"},
+            set(),
+        ),
+        # duckdb
+        ("select nextval('s') + a as id from c.s.t", "duckdb", {"always"}, set()),
+        ("select a from c.s.t where t > get_current_timestamp()", "duckdb", {"always"}, set()),
+        ("select a from c.s.t where t > transaction_timestamp()", "duckdb", {"always"}, set()),
+        ("select a from c.s.t where t > current_localtime()", "duckdb", {"always"}, set()),
+        ("select a from c.s.t where x = current_setting('TimeZone')", "duckdb", {"always"}, set()),
+        ("select a from c.s.t where x = getenv('HOME')", "duckdb", {"always"}, set()),
+        ("select a from c.s.t where x = txid_current()", "duckdb", {"always"}, set()),
     ],
 )
 def test_volatile_classes(sql, dialect, logic, stamps):
@@ -386,3 +428,12 @@ def test_snowflake_lateral_flatten_reads_the_base_table():
 )
 def test_snowflake_stage_reads_are_opaque(sql):
     assert analyze_sql(sql, "snowflake").opaque_inputs is True
+
+
+def test_facts_cached_before_the_facts_version_are_reanalyzed():
+    sql = "select a from c.s.t where r = current_role()"
+    stale = SqlAnalysis(code_hash="qualify:old", select_star=False).to_json()
+    old_key = hashlib.sha256(f"{HASH_VERSION}{chr(0)}{sql}".encode()).hexdigest()
+    key, analysis = analyze_node_sql(sql, None, None, old_key, stale, "snowflake")
+    assert key != old_key
+    assert analysis.volatile == {"session"}

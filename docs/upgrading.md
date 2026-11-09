@@ -4,6 +4,17 @@ What changes for a running project from one release to the next. Each release li
 
 Until 1.0, the settings and the record schema may change in a minor release.
 
+## 0.5.0
+
+### Behavior changes
+
+- **More volatile functions are seen.** Among them `current_time()`, `localtime`, `current_role()`, `current_warehouse()` and `seq4()` on Snowflake, `input_file_name()` and `getvariable()` on Databricks, `current_groups()` on Trino, and `nextval()` and `get_current_timestamp()` on DuckDB. [Hashing](how-it-works/hashing.md#volatile-functions) has the full list. A model that uses one of them outside a stamp column builds on its first run after the upgrade that is outside `lag_tolerance`, and from then on as its class says: a function of the `always` class makes the model build on every run outside `lag_tolerance`. `evaluate_volatile_sql: false` on a model counts no volatile function for it. No other node builds: `hash_version` stays `2`, and the first run after the upgrade parses every node's SQL once.
+- **Delta: `CHANGE COLUMN` counts as a data change.** Delta records a column comment, a widened column type, a changed nullability and a moved column under this one operation, and the last three change what a `select *` reads. Until now hodor ignored all of them. A table whose newest commit that counts is now a `CHANGE COLUMN`, for example one built with `persist_docs` column comments, gets a new data version: it builds once with `target_modified`, and the nodes that read it build once too. After that, a column comment written outside a build rebuilds the nodes that read the table. This also applies to the Delta Lake connector on Trino.
+
+### New
+
+- **`hodor_auto_prune`.** `true` deletes the records older than `hodor_lookback_days` at the end of each dbt-core run. Off by default. See [Configuration](configuration.md).
+
 ## 0.4.1
 
 ### Behavior changes

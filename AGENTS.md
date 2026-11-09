@@ -10,6 +10,7 @@ uv sync
 uv run pytest            # DuckDB only; benchmark, databricks, postgres markers skip by default
 uv run ruff check
 uv run ruff format
+uv run mypy
 uv run --group docs mkdocs build --strict
 ```
 

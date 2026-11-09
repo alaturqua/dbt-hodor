@@ -77,7 +77,7 @@ def _same_second_read(facts: NodeFacts, last: Record) -> str | None:
     if not all(v is not None and v.isascii() and v.isdigit() for v in values):
         return "unknown_upstream"
     built = int(values[0])  # type: ignore[arg-type]
-    if any(abs(int(t) - built) < SAME_SECOND_MS for t in tokens):
+    if any(abs(int(t) - built) < SAME_SECOND_MS for t in tokens):  # type: ignore[arg-type]
         return "same_second_read"
     started = last.built_at_ms
     if started is not None and any(

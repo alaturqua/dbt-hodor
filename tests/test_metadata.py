@@ -24,7 +24,8 @@ def entry(version, operation, metrics=None, ts=None):
         ("optimize", {}, False),
         ("VACUUM END", {}, False),
         ("SET TBLPROPERTIES", {}, False),
-        ("CHANGE COLUMN", {}, False),
+        # a comment, a widened type and a moved column are all CHANGE COLUMN
+        ("CHANGE COLUMN", {}, True),
         ("WRITE", {"numOutputRows": "0"}, False),
         ("WRITE", {"numOutputRows": "5"}, True),
         ("MERGE", {"numTargetRowsInserted": "0", "numTargetRowsUpdated": "0"}, False),

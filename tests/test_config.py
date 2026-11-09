@@ -162,6 +162,7 @@ def test_settings_from_profile_keys():
             "hodor_schema": "ops",
             "hodor_metadata_threads": 16,
             "hodor_lookback_days": 30,
+            "hodor_auto_prune": True,
         },
         {},
         pytest.fail,
@@ -174,7 +175,18 @@ def test_settings_from_profile_keys():
         table="hodor_state",
         metadata_threads=16,
         lookback_days=30,
+        auto_prune=True,
     )
+
+
+def test_auto_prune_is_off_by_default_and_reads_the_env_var():
+    assert load_settings({"hodor_store": "duckdb"}, {}, pytest.fail).auto_prune is False
+    env = {"HODOR_AUTO_PRUNE": "true"}
+    assert load_settings({"hodor_store": "duckdb"}, env, pytest.fail).auto_prune is True
+    warnings = []
+    raw = {"hodor_store": "duckdb", "hodor_auto_prune": "sometimes"}
+    assert load_settings(raw, {}, warnings.append).auto_prune is False
+    assert warnings == ["invalid hodor_auto_prune 'sometimes'; expected true or false, using False"]
 
 
 def test_database_schema_and_table_override_the_defaults():

@@ -176,7 +176,7 @@ class DeltaStore:
         args = (self._literal(project_name), self._literal(target_name), self._literal(before_ms))
         try:
             rows = self._execute(prune_sql(self._table, *args, delete=False))
-            count = int(rows[0][0]) if rows else 0
+            count = int(rows[0][0]) if rows else 0  # type: ignore[call-overload]
             if delete and count:
                 self._execute(prune_sql(self._table, *args, delete=True))
             return count

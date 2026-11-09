@@ -48,6 +48,7 @@ Set them as keys on the active `profiles.yml` target. An environment variable ov
 | `hodor_path` | `HODOR_PATH` | `.hodor/state.duckdb` | DuckDB database file, for `duckdb`. A relative path is relative to the dbt project root. |
 | `hodor_metadata_threads` | `HODOR_METADATA_THREADS` | `8` | 1-64 |
 | `hodor_lookback_days` | `HODOR_LOOKBACK_DAYS` | `90` | 1-3650. A node whose last build record is outside this window builds once (`no_history`). A reused node's build record is carried forward after half the window, so only nodes that did not run for that long age out. |
+| `hodor_auto_prune` | `HODOR_AUTO_PRUNE` | `false` | `true` or `false`. `true` deletes the records of this project and target that are older than `hodor_lookback_days` at the end of each `run`, `build`, `test`, `seed` and `snapshot`, as `dbt-hodor prune --yes` does. The principal needs DELETE on the state table; if the delete fails, the run warns and goes on. It costs one count query per run, and one delete when the count is above zero. Not read by `dbt-hodor serve`. |
 
 These apply to the `postgres` store only. Set either `hodor_endpoint` (Lakebase) or `hodor_host`.
 

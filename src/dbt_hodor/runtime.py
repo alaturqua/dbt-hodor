@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import json
 import os
 import threading
 import time
@@ -14,29 +13,24 @@ from dataclasses import dataclass
 from typing import Any
 
 from dbt.adapters.factory import get_adapter
-from dbt.artifacts.resources import DeferRelation, TestConfig
 from dbt.artifacts.schemas.results import RunStatus
 from dbt.artifacts.schemas.run import RunResult
 from dbt.flags import get_flags
-from dbt.node_types import REFABLE_NODE_TYPES
-from dbt_common.contracts.config.base import CompareBehavior
-from dbt_common.events.base_types import EventLevel
-from dbt_common.events.functions import fire_event
-from dbt_common.events.types import Note
 from dbt_common.exceptions import DbtRuntimeError
 from dbt_common.invocation import get_invocation_id
 
 from dbt_hodor import __version__
-from dbt_hodor.clone import CLONED, PRE_CLONED, may_clone, node_upstreams, relation_ids
+from dbt_hodor.base_target import _record_relation
+from dbt_hodor.clone import CLONE, CLONED, PRE_CLONED, may_clone, node_upstreams, relation_ids
 from dbt_hodor.config import (
-    WAREHOUSE_STORES,
+    DAY_MS,
     NodeStateConfig,
     Settings,
     effective,
     load_settings,
     node_state_config,
 )
-from dbt_hodor.defer import deferred_relations, split_relation
+from dbt_hodor.defer import split_relation
 from dbt_hodor.engine import (
     BUILD,
     CODE_PREFIX,
@@ -58,6 +52,7 @@ from dbt_hodor.hashing import (
 )
 from dbt_hodor.lineage import GraphNode, Lineage, external_inputs, normalize_relation
 from dbt_hodor.metadata import UNKNOWN, DataVersion
+from dbt_hodor.node_hashes import _parse_macros, seed_hash, v1_node_hashes
 from dbt_hodor.providers import (
     VIEW_PREFIX,
     DeltaProvider,
@@ -65,10 +60,10 @@ from dbt_hodor.providers import (
     Provider,
     SnowflakeProvider,
     TrinoProvider,
-    store_executor,
 )
 from dbt_hodor.records import CARRY, Record
-from dbt_hodor.selection import select
+from dbt_hodor.records import by_unique_id as _by_unique_id
+from dbt_hodor.session import _profile_settings, debug, info, open_store, warn
 from dbt_hodor.store import StateStore, StoreError
 
 PROVIDERS = {
@@ -91,20 +86,6 @@ NODE_TYPES = ("model", "seed", "snapshot")  # the ModelRunner family
 FLUSH_EVERY = 200
 REPLAY_PREFIX = "dbt-hodor: replayed"
 OPAQUE_GROUP = "<opaque inputs>"
-DAY_MS = 86_400_000
-CLONE = "clone"  # action of a record of a table cloned from the base target
-
-
-def info(msg: str) -> None:
-    fire_event(Note(msg=msg), level=EventLevel.INFO)
-
-
-def warn(msg: str) -> None:
-    fire_event(Note(msg=msg), level=EventLevel.WARN)
-
-
-def debug(msg: str) -> None:
-    fire_event(Note(msg=msg), level=EventLevel.DEBUG)
 
 
 def _value(enum_or_str: Any) -> str:
@@ -154,376 +135,12 @@ def model_kind(model: Any) -> str:
     return "unsupported"
 
 
-def seed_hash(seed: Any) -> str:
-    """sha256 of the seed file. dbt's own checksum is only the path for large seeds."""
-    with open(os.path.join(seed.root_path, seed.original_file_path), "rb") as f:
-        data = f.read().replace(b"\r\n", b"\n")  # same hash on Windows and Linux checkouts
-    return hashlib.sha256(data).hexdigest()
-
-
-# the config keys dbt's TestConfig.same_contents compares; every other test config is ignored
-_TEST_COMPARED_KEYS = (
-    "severity",
-    "where",
-    "limit",
-    "fail_calc",
-    "warn_if",
-    "error_if",
-    "store_failures",
-    "store_failures_as",
-    "sql_header",
-)
-
-
-def _digest(value: object) -> str:
-    text = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _compared_config(node: Any) -> dict[str, object]:
-    """The unrendered config as dbt's `same_config` compares it: without the keys its config
-    class excludes (alias, schema, database, tags, group); a test compares only modifiers."""
-    unrendered = dict(getattr(node, "unrendered_config", None) or {})
-    config = getattr(node, "config", None)
-    if isinstance(config, TestConfig):
-        return {k: unrendered[k] for k in _TEST_COMPARED_KEYS if k in unrendered}
-    get_fields = getattr(type(config), "_get_fields", None)
-    if get_fields is None:
-        return unrendered
-    excluded = {name for fld, name in get_fields() if not CompareBehavior.should_include(fld)}
-    return {k: v for k, v in unrendered.items() if k not in excluded}
-
-
-def _parse_macros(node: Any) -> tuple[str, ...]:
-    return tuple(getattr(getattr(node, "depends_on", None), "macros", None) or ())
-
-
-def _macro_closure(
-    node: Any, manifest: Any, macros: Sequence[str] | None = None
-) -> dict[str, str | None]:
-    """macro_sql of every macro the node calls, directly or through other macros. `macros`:
-    the node's direct macros at parse time, when the node may have been compiled since."""
-    out: dict[str, str | None] = {}
-    stack = list(_parse_macros(node) if macros is None else macros)
-    while stack:
-        macro_id = stack.pop()
-        if str(macro_id) in out:
-            continue
-        macro = manifest.macros.get(macro_id) if macro_id else None
-        out[str(macro_id)] = macro.macro_sql if macro is not None else None
-        if macro is not None:
-            stack.extend(macro.depends_on.macros)
-    return out
-
-
-def v1_node_hashes(
-    node: Any, manifest: Any, macros: Sequence[str] | None = None
-) -> dict[str, object]:
-    """`node_hashes` of a record: what dbt-core's `state:modified` sub-selectors compare,
-    and the relation name as written. State selection hashes parsed nodes; a record hashes
-    a compiled one, so it passes `macros`, the node's macros at parse time: compiling a
-    generic test adds macros to its `depends_on`."""
-    unrendered = getattr(node, "unrendered_config", None) or {}
-    checksum = getattr(node, "checksum", None)
-    contract = getattr(node, "contract", None)
-    persist = getattr(getattr(node, "config", None), "persist_docs", None) or {}
-    persisted: dict[str, object] = {}
-    if persist.get("relation"):
-        persisted["relation"] = getattr(node, "description", None)
-    if persist.get("columns"):
-        columns = getattr(node, "columns", None) or {}
-        persisted["columns"] = {name: col.description for name, col in columns.items()}
-    enforced = contract is not None and contract.enforced
-    return {
-        "engine": "v1",
-        "relation": getattr(node, "relation_name", None) or None,
-        "body": checksum.checksum if checksum is not None else None,
-        # dbt's same_fqn and same_ref_representation have no key of their own: they count
-        # as configs, so modified.configs selects them too
-        "configs": _digest(
-            [_compared_config(node)]
-            + [getattr(node, k, None) for k in ("fqn", "latest_version", "access")]
-            + [getattr(node, "deprecation_date", None)]
-        ),
-        "contract": (contract.checksum or "enforced") if enforced else None,
-        "macros": _digest(_macro_closure(node, manifest, macros)),
-        "relation_hash": _digest({k: unrendered.get(k) for k in ("database", "schema", "alias")}),
-        "persisted_descriptions": _digest(persisted) if persisted else None,
-    }
-
-
-def _record_relation(record: Record) -> str | None:
-    hashes = record.node_hashes
-    relation = hashes.get("relation") if isinstance(hashes, Mapping) else None
-    return relation if isinstance(relation, str) and relation else None
-
-
-def _by_unique_id(records: Iterable[Record]) -> dict[str, Record]:
-    """The newest record per unique_id. Records are keyed by relation, which can change."""
-    out: dict[str, Record] = {}
-    for record in records:
-        current = out.get(record.unique_id)
-        if current is None or (current.recorded_at_ms, current.record_id) <= (
-            record.recorded_at_ms,
-            record.record_id,
-        ):
-            out[record.unique_id] = record
-    return out
-
-
-def _node_base(node: Any) -> str | None:
-    """The node's own `state: defer_to_target`, which overrides the target's for that node."""
-    config = getattr(node, "config", None)
-    raw = config.get("state") if hasattr(config, "get") else None
-    return node_state_config(raw if isinstance(raw, Mapping) else None, debug).defer_to_target
-
-
-def _check_base(unique_id: str, node: Any, base: str) -> None:
-    """State selection compares every node with one base target: a node that names another
-    one cannot be answered."""
-    other = _node_base(node)
-    if other is not None and other != base:
-        raise StoreError(
-            f"node {unique_id} sets defer_to_target {other}; state selection uses one base target"
-        )
-
-
-def _base_settings(config: Any) -> Settings:
-    return load_settings(
-        _profile_settings(config),
-        os.environ,
-        lambda m: warn(f"dbt-hodor: {m}"),
-        adapter_type=config.credentials.type,
-    )
-
-
-def _read_base(
-    settings: Settings,
-    config: Any,
-    adapter: Any,
-    base: str,
-    connect: bool = True,
-    any_status: Sequence[bool] = (False,),
-    reused: bool = False,
-) -> list[dict[str, Record]]:
-    """The base target's newest record per unique_id, of any action: one map per entry of
-    `any_status`, successful records only for False. `reused` counts reuse records as
-    successful (state selection). `connect` False when the caller already holds a dbt
-    connection."""
-    store = open_store(settings, config, adapter, read_only=True)
-    try:
-        since = int(time.time() * 1000) - settings.lookback_days * DAY_MS
-
-        def read() -> list[dict[str, Record]]:
-            maps = []
-            for flag in any_status:
-                extra: dict[str, bool] = {"any_status": True} if flag else {}
-                if reused:  # the default read stays as it was
-                    extra["reused"] = True
-                records = store.load_latest(config.project_name, base, since, **extra)
-                maps.append(_by_unique_id(records.values()))
-            return maps
-
-        if connect and settings.store in WAREHOUSE_STORES:  # these read through dbt's connection
-            with adapter.connection_named("hodor"):
-                return read()
-        return read()
-    finally:
-        store.close()
-
-
-def state_selection(
-    config: Any, manifest: Any, criterion: str, nodes: Iterable[tuple[str, Any]]
-) -> frozenset[str] | None:
-    """The ids among `nodes` that match a `state:` criterion against the base target's latest
-    records. None without a base target: dbt-core's own method answers. Anything else that
-    stops the comparison fails the run, as dbt-core does without a comparison manifest."""
-    try:
-        settings = _base_settings(config)
-    except Exception as exc:  # noqa: BLE001 - no known base target: dbt-core answers
-        warn(f"dbt-hodor: cannot read the base target for state selection: {exc}")
-        return None
-    base = settings.defer_to_target
-    if base is None:
-        return None
-    try:
-        if settings.mode == "off":
-            raise StoreError("dbt-hodor is off")
-        current: dict[str, dict[str, object]] = {}
-        for uid, node in nodes:
-            _check_base(uid, node, base)
-            current[uid] = v1_node_hashes(node, manifest)
-        # a node only reused in the base target still counts, with the hashes it ran with
-        (latest,) = _read_base(settings, config, get_adapter(config), base, reused=True)
-        return select(criterion, current, latest, "v1")
-    except Exception as exc:
-        raise DbtRuntimeError(f"dbt-hodor cannot compare with {base}: {exc}") from exc
-
-
-def _defer_relation(config: Any, adapter: Any, node: Any, relation: str) -> DeferRelation | None:
-    """The DeferRelation dbt's merge_from_artifact would build, from the relation a base
-    build wrote. None when the text does not render back to the same relation. A record holds
-    only the relation: config, description, meta and tags come from the current node, not
-    from the base target's, and there is no compiled code."""
-    relation_cls = adapter.Relation
-    parts = split_relation(relation, relation_cls.quote_character)
-    if parts is None or len(parts) not in (2, 3):
-        return None
-    # two parts: the adapter does not render the database, so the node's own one is kept
-    database, schema, alias = parts if len(parts) == 3 else [node.database, *parts]
-    deferred = DeferRelation(
-        database=database,
-        schema=schema,
-        alias=alias,
-        relation_name=relation,
-        resource_type=node.resource_type,
-        name=node.name,
-        description=node.description,
-        compiled_code=None,  # a record holds no code
-        meta=node.meta,
-        tags=node.tags,
-        config=node.config,
-    )
-    if str(relation_cls.create_from(config, deferred)) != relation:
-        return None
-    return deferred
-
-
-def defer_target(config: Any) -> str | None:
-    """The base target name for a warning, or None when it cannot be read."""
-    try:
-        return _base_settings(config).defer_to_target
-    except Exception:  # noqa: BLE001 - only names the target in a message
-        return None
-
-
-def defer_to_base(config: Any, manifest: Any, selected: Iterable[str]) -> bool:
-    """`--defer` without --state: point unselected nodes at the relations the base target's
-    builds wrote. False when hodor does not defer, so dbt-core answers as without hodor. A
-    node is deferred only from a successful base build whose relation renders back exactly."""
-    try:
-        settings = _base_settings(config)
-    except Exception as exc:  # noqa: BLE001 - no known base target: dbt-core answers
-        warn(f"dbt-hodor: cannot read the base target for defer: {exc}")
-        return False
-    base = settings.defer_to_target
-    if base is None or base == config.target_name:
-        return False
-    try:
-        if settings.mode == "off":
-            raise StoreError("dbt-hodor is off")
-        chosen = set(selected)
-        nodes = {
-            uid: node
-            for uid, node in manifest.nodes.items()
-            if uid not in chosen
-            and node.resource_type in REFABLE_NODE_TYPES
-            and not node.is_ephemeral
-            and _node_base(node) in (None, base)  # a node naming another base is not deferred
-        }
-        adapter = get_adapter(config)
-        # dbt's before_run holds a connection; dbt-hodor's run start does not
-        held = adapter.connections.get_if_exists() is not None
-        latest, newest = _read_base(
-            settings, config, adapter, base, connect=not held, any_status=(False, True)
-        )
-        found = deferred_relations(nodes, latest, base, config.target_name, newest)
-        deferred: dict[str, Any] = {}
-        for uid, relation in found.items():
-            target = _defer_relation(config, adapter, nodes[uid], relation)
-            if target is not None:
-                deferred[uid] = dataclasses.replace(nodes[uid], defer_relation=target)
-    except Exception as exc:  # noqa: BLE001 - no hodor defer: dbt-core answers
-        warn(f"dbt-hodor could not defer to {base}: {exc}; dbt fails the run without --state")
-        return False
-    manifest.nodes.update(deferred)  # all or nothing
-    if not latest:
-        warn(f"dbt-hodor found no records for {base} to defer to")
-    elif nodes and not deferred:
-        warn(f"dbt-hodor deferred none of {len(nodes)} unselected nodes to {base}")
-    debug(f"dbt-hodor: deferred {len(deferred)} of {len(nodes)} unselected nodes to {base}")
-    return True
-
-
 def full_refresh(node: Any) -> bool:
     """dbt's rule: the node's full_refresh config, when set, wins over the flag."""
     configured = node.config.get("full_refresh")
     if configured is not None:
         return bool(configured)
     return bool(getattr(get_flags(), "FULL_REFRESH", False))
-
-
-_BASE_TARGET_KEYS = ("defer_to_target", "allow_clones", "pre_clone")
-
-
-def _profile_settings(config: Any) -> dict[str, object]:
-    """hodor_* keys and the base target keys of the active target. dbt drops unknown keys
-    from credentials, so read profiles.yml again and render the keys the way dbt renders
-    the profile."""
-    from dbt.config.profile import read_profile
-    from dbt.config.renderer import ProfileRenderer
-
-    raw = read_profile(str(get_flags().PROFILES_DIR))
-    outputs = (raw.get(config.profile_name) or {}).get("outputs") or {}
-    target = outputs.get(config.target_name) or {}
-    keys = {
-        k: v
-        for k, v in target.items()
-        if isinstance(k, str) and (k.startswith("hodor_") or k in _BASE_TARGET_KEYS)
-    }
-    rendered: dict[str, object] = ProfileRenderer(config.cli_vars).render_data(keys)
-    # `--vars '{hodor_mode: off}'` overrides the profile for one invocation (env vars still win)
-    rendered.update(
-        {k: v for k, v in (config.cli_vars or {}).items() if str(k).startswith("hodor_")}
-    )
-    rendered["database"] = config.credentials.database
-    return rendered
-
-
-def open_store(
-    settings: Settings, config: Any, adapter: Any, read_only: bool = False
-) -> StateStore:
-    if settings.store == "duckdb":
-        from dbt_hodor.store.duckdb import DuckDBStore
-
-        path = settings.path
-        if path != ":memory:" and not os.path.isabs(path):
-            path = os.path.join(config.project_root, path)
-        return DuckDBStore(path, settings.schema or "main", settings.table, read_only)
-    if settings.store == "postgres":
-        from dbt_hodor.store.postgres import PostgresStore, lakebase_target
-
-        assert settings.database and settings.schema  # load_settings turns hodor off otherwise
-        host, user, credential = settings.host, settings.user, None
-        if settings.endpoint:  # Lakebase: the endpoint supplies host, user and the token
-            host, user, credential = lakebase_target(settings.endpoint)
-        if credential is None:
-            password = settings.password or ""
-            credential = lambda: password  # noqa: E731 - a plain Postgres password
-        assert host  # load_settings turns hodor off without a host or an endpoint
-        return PostgresStore(
-            settings.database,
-            settings.schema,
-            settings.table,
-            host,
-            settings.port,
-            user or "",
-            credential,
-            settings.sslmode,
-            read_only,
-        )
-    from dbt_hodor.store.delta import DeltaStore
-    from dbt_hodor.store.trino import TrinoStore
-
-    assert settings.database and settings.schema  # load_settings turns hodor off otherwise
-    store_class = TrinoStore if settings.store == "trino" else DeltaStore
-    return store_class(
-        settings.database,
-        settings.schema,
-        settings.table,
-        store_executor(adapter),
-        read_only=read_only,
-    )
 
 
 def provider_class_for(adapter_type: str, store: str) -> type[Provider] | None:
@@ -1439,6 +1056,17 @@ class Runtime:
 
     # -- end of run ----------------------------------------------------------------------
 
+    def _prune(self) -> None:
+        """hodor_auto_prune: delete this project and target's records that no run reads any
+        more, those older than the lookback window."""
+        before_ms = self.now_ms() - self.settings.lookback_days * DAY_MS
+        try:
+            count = self.store.prune(self.project_name, self.target_name, before_ms, delete=True)
+        except Exception as exc:  # noqa: BLE001 - old records only cost space
+            warn(f"dbt-hodor: {exc}; old records stay")
+            return
+        debug(f"dbt-hodor: pruned {count} records older than {self.settings.lookback_days} days")
+
     def finish(self) -> None:
         if self.finished:
             return
@@ -1447,6 +1075,8 @@ class Runtime:
             batch, self._pending = self._pending, []
         if batch:
             self._write(batch)
+        if self.settings.auto_prune:
+            self._prune()
         try:
             self.store.close()
         except Exception as exc:  # noqa: BLE001
@@ -1488,7 +1118,6 @@ def get_runtime(
 
 def start_runtime(task: Any, selected_uids: Any) -> None:
     """Create the runtime on the main thread before any node runs, then prefetch."""
-    from dbt.adapters.factory import get_adapter
 
     adapter = get_adapter(task.config)
     state_manifest = None

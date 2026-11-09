@@ -129,6 +129,7 @@ Set them on the `profiles.yml` target, or for one run with `--vars '{hodor_mode:
 | `hodor_path` | `HODOR_PATH` | `.hodor/state.duckdb` | DuckDB database file, for `duckdb` |
 | `hodor_metadata_threads` | `HODOR_METADATA_THREADS` | `8` | 1-64 |
 | `hodor_lookback_days` | `HODOR_LOOKBACK_DAYS` | `90` | 1-3650 |
+| `hodor_auto_prune` | `HODOR_AUTO_PRUNE` | `false` | `true` deletes records older than `hodor_lookback_days` at the end of each run |
 | `hodor_endpoint`, `hodor_host`, `hodor_port`, `hodor_user`, `hodor_password`, `hodor_sslmode` | `HODOR_ENDPOINT`, `HODOR_HOST`, `HODOR_PORT`, `HODOR_USER`, `HODOR_PASSWORD`, `HODOR_SSLMODE` | `hodor_port` `5432`, `hodor_sslmode` `require`, the others none | The connection of the `postgres` store: `hodor_endpoint` for Lakebase, or `hodor_host` for any other Postgres. See [Configuration](docs/configuration.md#settings) |
 | `dbt-hodor serve` flags (dbt v2) | `HODOR_STORE`, `HODOR_PATH`, the store variables, `HODOR_LOOKBACK_DAYS`, `HODOR_ALLOW_CLONES` | see [dbt v2](docs/dbt-v2.md#install-and-start) | `--project-dir`, `--port`, `--store`, `--path`, `--allow-clones`. The server reads no `profiles.yml` |
 

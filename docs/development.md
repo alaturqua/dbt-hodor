@@ -7,6 +7,7 @@ uv sync
 uv run pytest
 uv run ruff check
 uv run ruff format
+uv run mypy
 ```
 
 `dbt-hodor` is available on [PyPI](https://pypi.org/project/dbt-hodor/).
@@ -60,7 +61,9 @@ src/dbt_hodor/
   state_config.py  make dbt merge the `state:` config key (derived from upstream)
   patches.py     patched ModelRunner.execute, test execute, result lines (model, seed,
                  snapshot, test), run-end flush
-  runtime.py     one run: settings, store, records, per-node decisions
+  runtime.py     one run: records and per-node decisions
+  session.py     the dbt log, the profile target's hodor settings and their store
+  base_target.py state selection and defer from the base target's records
   config.py      state: keys and hodor settings
   hashing.py     normalized SQL and config hashes (sqlglot)
   lineage.py     upstream tables per node
@@ -68,6 +71,7 @@ src/dbt_hodor/
   providers.py   per-adapter metadata providers
   engine.py      pure decision rules (no I/O)
   records.py     record schema and SQL
+  node_hashes.py what dbt-core's state:modified compares, hashed for a record
   store/         delta.py, duckdb.py, postgres.py, trino.py
   explain.py     dbt-hodor explain: report and text output
   cli.py         the dbt-hodor command (ddl, explain, prune, serve)
@@ -102,7 +106,7 @@ dbt imports every installed top-level module named `dbt_*` that has a `plugins` 
 
 - The live test in `tests/integration/test_dbt_v2.py` runs dbt-oss 2.0.8 against a Databricks SQL warehouse, with the state server in the test process on a DuckDB store. It covers a first build and a second run that reuses, a changed seed, a failed build, `--full-refresh`, `dbt state explain`, `state:modified`, `--defer`, a clone from the base target, a stopped server, a server that never answers, an unsupported client version, `--no-manage-state`, and `dbt-hodor serve` started as a process. It sets `RUN_CACHE_FRESHNESS_TOLERANCE=0`, so a changed upstream builds, and starts the server with clones on. The default (clones off) is covered by server tests (`clones_off`, `HODOR_ALLOW_CLONES`), not live. It is marked `dbt_v2` and skipped by default. It needs the `HODOR_DBX_*` variables above and `HODOR_DBT_V2_PYTHON`, the Python of a separate virtual environment that has dbt-oss installed. It uses the schemas `<HODOR_DBX_SCHEMA>_v2` and `<HODOR_DBX_SCHEMA>_v2_dev` and drops both with `CASCADE` at the end. The test of a server that never answers waits about two minutes for dbt's timeout.
 
-- The live test in `tests/integration/test_trino_iceberg.py` runs real dbt-trino builds on a Trino Iceberg catalog with the state in a local DuckDB file: first run builds, second run reuses, a new source row rebuilds the tables while the unchanged view stays reused, a rollback with `rollback_to_snapshot` rebuilds them, a changed view definition rebuilds the view, and `ALTER TABLE ... ADD COLUMN` on a source rebuilds a `select *` table. The test runs twice: with the state in a DuckDB file, and with `hodor_store: trino`, where it also reads the state table back from Trino and checks that run 2 reuses from those records. It was run against Trino 476 in Docker. It covers the Iceberg connector only; the Delta Lake connector has unit tests only (see [Data versions](adapters/trino.md#data-version)). It is marked `trino` and skipped by default, and skips itself when no server answers. `HODOR_TEST_TRINO_HOST` and `HODOR_TEST_TRINO_PORT` default to `localhost` and `8080`. The test creates one schema per run and drops it at the end.
+- The live test in `tests/integration/test_trino_iceberg.py` runs real dbt-trino builds on a Trino Iceberg catalog with the state in a local DuckDB file: first run builds, second run reuses, a new source row rebuilds the tables while the unchanged view stays reused, a rollback with `rollback_to_snapshot` rebuilds them, a changed view definition rebuilds the view, and `ALTER TABLE ... ADD COLUMN` on a source rebuilds a `select *` table. The test runs twice: with the state in a DuckDB file, and with `hodor_store: trino`, where it also reads the state table back from Trino and checks that run 2 reuses from those records. It was run against Trino 476 in Docker. It covers the Iceberg connector only; the Delta Lake connector has unit tests only (see [Data versions](adapters/trino.md#data-version)). It is marked `trino` and skipped by default, and skips itself when no server answers. CI runs it against the same container. `HODOR_TEST_TRINO_HOST` and `HODOR_TEST_TRINO_PORT` default to `localhost` and `8080`. The test creates one schema per run and drops it at the end.
 
     ```sh
     docker run -d --name hodor-trino -p 8080:8080 \

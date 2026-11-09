@@ -33,20 +33,18 @@ from dbt_common.events.format import format_fancy_output_line
 from dbt_common.events.functions import fire_event
 from dbt_common.ui import green, red, yellow
 
+from dbt_hodor.base_target import defer_target, defer_to_base, state_selection
 from dbt_hodor.clone import CLONED
 from dbt_hodor.engine import REUSE
 from dbt_hodor.plugin import ORIGINALS
 from dbt_hodor.runtime import (
     REPLAY_PREFIX,
     current_runtime,
-    defer_target,
-    defer_to_base,
     finish_runtime,
     get_runtime,
     start_runtime,
-    state_selection,
-    warn,
 )
+from dbt_hodor.session import warn
 
 
 def model_execute(self: Any, model: Any, manifest: Any) -> Any:

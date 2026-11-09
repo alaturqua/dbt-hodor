@@ -30,6 +30,7 @@ uv sync
 uv run pytest
 uv run ruff check
 uv run ruff format
+uv run mypy
 ```
 
 The documentation is published at <https://alaturqua.github.io/dbt-hodor/>; `uv run --group docs mkdocs serve` builds it locally.
@@ -45,7 +46,7 @@ dbt, and how to run the opt-in live tests.
    metadata and the stores stay separate. Please do not move I/O into the engine.
 3. **Fail open.** Every failure path must end in a build, never a reuse, and must never fail
    the dbt run. If you add a new way for hodor to fail, add the test that proves it builds.
-4. **Run the checks.** `uv run pytest`, `uv run ruff check` and `uv run ruff format` all have
+4. **Run the checks.** `uv run pytest`, `uv run ruff check`, `uv run ruff format` and `uv run mypy` all have
    to pass. Benchmarks (`-m benchmark`), the Databricks live test (`-m databricks`) and the
    Postgres live test (`-m postgres`) are skipped by default and need credentials, so they
    are not expected from an outside contributor. Say in the pull request which of them you
