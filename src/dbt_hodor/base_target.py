@@ -14,12 +14,18 @@ from dbt.artifacts.resources import DeferRelation
 from dbt.node_types import REFABLE_NODE_TYPES
 from dbt_common.exceptions import DbtRuntimeError
 
-from dbt_hodor.config import DAY_MS, WAREHOUSE_STORES, Settings, load_settings, node_state_config
-from dbt_hodor.defer import deferred_relations, split_relation
+from dbt_hodor.core.config import (
+    DAY_MS,
+    WAREHOUSE_STORES,
+    Settings,
+    load_settings,
+    node_state_config,
+)
+from dbt_hodor.core.defer import deferred_relations, split_relation
+from dbt_hodor.core.records import Record
+from dbt_hodor.core.records import by_unique_id as _by_unique_id
+from dbt_hodor.core.selection import select
 from dbt_hodor.node_hashes import v1_node_hashes
-from dbt_hodor.records import Record
-from dbt_hodor.records import by_unique_id as _by_unique_id
-from dbt_hodor.selection import select
 from dbt_hodor.session import _profile_settings, debug, open_store, warn
 from dbt_hodor.store import StoreError
 

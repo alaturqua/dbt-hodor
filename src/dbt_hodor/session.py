@@ -10,7 +10,7 @@ from dbt_common.events.base_types import EventLevel
 from dbt_common.events.functions import fire_event
 from dbt_common.events.types import Note
 
-from dbt_hodor.config import WAREHOUSE_STORES, Settings
+from dbt_hodor.core.config import WAREHOUSE_STORES, Settings
 from dbt_hodor.providers import store_executor
 from dbt_hodor.store import StateStore, open_local_store
 

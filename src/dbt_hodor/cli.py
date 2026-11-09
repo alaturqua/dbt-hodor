@@ -10,8 +10,8 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
-from dbt_hodor.config import DAY_MS, IDENT_RE, WAREHOUSE_STORES
-from dbt_hodor.records import create_table_sql, lookup_index_sql
+from dbt_hodor.core.config import DAY_MS, IDENT_RE, WAREHOUSE_STORES
+from dbt_hodor.core.records import create_table_sql, lookup_index_sql
 
 
 def _ident(value: str) -> str:
@@ -56,7 +56,7 @@ def _open_store(
     from dbt.mp_context import get_mp_context
     from dbt_common.context import set_invocation_context
 
-    from dbt_hodor.config import load_settings
+    from dbt_hodor.core.config import load_settings
     from dbt_hodor.session import _profile_settings, open_store
     from dbt_hodor.store import StoreError
 
@@ -176,7 +176,7 @@ def _wait_for_interrupt(server: Any) -> None:
 def _serve_clones(args: argparse.Namespace) -> bool:
     """v2 clones are off unless `--allow-clones` or HODOR_ALLOW_CLONES=true: a dbt v2 shallow
     clone of an auto-clustered Databricks table makes the next rebuild of it fail."""
-    from dbt_hodor.config import _parse_bool
+    from dbt_hodor.core.config import _parse_bool
 
     if args.allow_clones:
         return True
@@ -197,7 +197,7 @@ def _serve_clones(args: argparse.Namespace) -> bool:
 def _serve(args: argparse.Namespace) -> int:
     import importlib.util
 
-    from dbt_hodor.config import load_settings
+    from dbt_hodor.core.config import load_settings
     from dbt_hodor.store import open_local_store
 
     if importlib.util.find_spec("grpc") is None:

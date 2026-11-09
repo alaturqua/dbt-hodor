@@ -29,7 +29,7 @@ snowflake_connector = pytest.importorskip("snowflake.connector")
 
 from dbt.cli.main import dbtRunner  # noqa: E402
 
-from dbt_hodor.metadata import UNKNOWN  # noqa: E402
+from dbt_hodor.core.metadata import UNKNOWN  # noqa: E402
 from dbt_hodor.providers import SnowflakeProvider  # noqa: E402
 
 

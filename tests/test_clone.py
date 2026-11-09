@@ -4,11 +4,11 @@ from dataclasses import replace
 
 import pytest
 
-from dbt_hodor.clone import PRE_CLONED, may_clone, node_upstreams, relation_ids
-from dbt_hodor.config import BaseTarget
-from dbt_hodor.engine import BUILD, REUSE, Decision, NodeFacts
-from dbt_hodor.metadata import DataVersion
-from dbt_hodor.records import Record
+from dbt_hodor.core.clone import PRE_CLONED, may_clone, node_upstreams, relation_ids
+from dbt_hodor.core.config import BaseTarget
+from dbt_hodor.core.engine import BUILD, REUSE, Decision, NodeFacts
+from dbt_hodor.core.metadata import DataVersion
+from dbt_hodor.core.records import Record
 
 
 def _record(uid="model.p.a", node_hashes=None, **kw):

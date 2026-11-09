@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
 
-from dbt_hodor.metadata import (
+from dbt_hodor.core.metadata import (
     UNKNOWN,
     DataVersion,
     delta_data_version,

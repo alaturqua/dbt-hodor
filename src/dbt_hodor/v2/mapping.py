@@ -9,12 +9,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..clone import CLONED
-from ..engine import CODE_PREFIX, REUSE, VOLATILE_PREFIX, Decision, NodeFacts
-from ..hashing import HASH_VERSION, SqlAnalysis, analyze_node_sql, analyze_sql
-from ..lineage import normalize_relation
-from ..metadata import UNKNOWN, DataVersion
-from ..records import Record
+from ..core.clone import CLONED
+from ..core.engine import CODE_PREFIX, REUSE, VOLATILE_PREFIX, Decision, NodeFacts
+from ..core.hashing import HASH_VERSION, SqlAnalysis, analyze_node_sql, analyze_sql
+from ..core.lineage import normalize_relation
+from ..core.metadata import UNKNOWN, DataVersion
+from ..core.records import Record
 from .proto.query_cache_protobuf.query_cache import shared_pb2
 from .proto.query_cache_protobuf.query_cache.services import (
     clone_service_pb2,

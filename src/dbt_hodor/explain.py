@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from dbt_hodor.records import CARRY, Record
+from dbt_hodor.core.records import CARRY, Record
 
 _OK_STATUSES = ("success", "pass", "reused")
 

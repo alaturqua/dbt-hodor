@@ -21,8 +21,8 @@ from dbt_common.invocation import get_invocation_id
 
 from dbt_hodor import __version__
 from dbt_hodor.base_target import _record_relation
-from dbt_hodor.clone import CLONE, CLONED, PRE_CLONED, may_clone, node_upstreams, relation_ids
-from dbt_hodor.config import (
+from dbt_hodor.core.clone import CLONE, CLONED, PRE_CLONED, may_clone, node_upstreams, relation_ids
+from dbt_hodor.core.config import (
     DAY_MS,
     NodeStateConfig,
     Settings,
@@ -30,8 +30,8 @@ from dbt_hodor.config import (
     load_settings,
     node_state_config,
 )
-from dbt_hodor.defer import split_relation
-from dbt_hodor.engine import (
+from dbt_hodor.core.defer import split_relation
+from dbt_hodor.core.engine import (
     BUILD,
     CODE_PREFIX,
     REUSE,
@@ -41,7 +41,7 @@ from dbt_hodor.engine import (
     decide,
     upstream_versions,
 )
-from dbt_hodor.hashing import (
+from dbt_hodor.core.hashing import (
     HASH_VERSION,
     SqlAnalysis,
     analyze_node_sql,
@@ -50,8 +50,10 @@ from dbt_hodor.hashing import (
     normalize_runtime_values,
     unrendered_hash,
 )
-from dbt_hodor.lineage import GraphNode, Lineage, external_inputs, normalize_relation
-from dbt_hodor.metadata import UNKNOWN, DataVersion
+from dbt_hodor.core.lineage import GraphNode, Lineage, external_inputs, normalize_relation
+from dbt_hodor.core.metadata import UNKNOWN, DataVersion
+from dbt_hodor.core.records import CARRY, Record
+from dbt_hodor.core.records import by_unique_id as _by_unique_id
 from dbt_hodor.node_hashes import _parse_macros, seed_hash, v1_node_hashes
 from dbt_hodor.providers import (
     VIEW_PREFIX,
@@ -61,8 +63,6 @@ from dbt_hodor.providers import (
     SnowflakeProvider,
     TrinoProvider,
 )
-from dbt_hodor.records import CARRY, Record
-from dbt_hodor.records import by_unique_id as _by_unique_id
 from dbt_hodor.session import _profile_settings, debug, info, open_store, warn
 from dbt_hodor.store import StateStore, StoreError
 

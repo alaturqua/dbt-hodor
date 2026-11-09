@@ -1,4 +1,4 @@
-from dbt_hodor.records import (
+from dbt_hodor.core.records import (
     COLUMN_NAMES,
     Record,
     add_column_sql,

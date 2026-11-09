@@ -64,14 +64,17 @@ dbt process
  └─ dbt_hodor (auto-loaded plugin)
      ├─ plugin.py     initialize(): mode check, command gate, guard, install patches
      ├─ patches.py    ModelRunner.execute, TestRunner execute and result line, run-end flush
-     ├─ config.py     state: keys, hodor settings, precedence
-     ├─ hashing.py    normalized SQL and config hashes (sqlglot, dialect of the target's adapter)
-     ├─ lineage.py    upstream tables per node: dbt parents, sources, external inputs
-     ├─ metadata.py   data versions: tokens and Delta history rules
+     ├─ runtime.py    one run: records and per-node decisions
      ├─ providers.py  per adapter queries: Databricks, Trino, Snowflake, DuckDB
-     ├─ engine.py     pure decision rules (no I/O)
+     ├─ core/         the pure modules: no dbt import and no I/O
+     │   ├─ config.py     state: keys, hodor settings, precedence
+     │   ├─ hashing.py    normalized SQL and config hashes (sqlglot, dialect of the target's adapter)
+     │   ├─ lineage.py    upstream tables per node: dbt parents, sources, external inputs
+     │   ├─ metadata.py   data versions: tokens and Delta history rules
+     │   ├─ engine.py     decision rules
+     │   ├─ records.py    record schema and SQL
+     │   └─ clone.py, defer.py, selection.py   rules for clones, defer and state selection
      ├─ store/        StateStore protocol: delta.py, trino.py, duckdb.py, postgres.py
-     ├─ clone.py, defer.py, selection.py   pure rules for clones, defer and state selection
      ├─ v2/           the dbt v2 state server and request mapping
      └─ cli.py        dbt-hodor ddl, explain, prune, serve
 ```

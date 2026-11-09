@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from dbt_hodor.config import IDENT_RE
-from dbt_hodor.records import (
+from dbt_hodor.core.config import IDENT_RE
+from dbt_hodor.core.records import (
     COLUMN_NAMES,
     Record,
     add_column_sql,

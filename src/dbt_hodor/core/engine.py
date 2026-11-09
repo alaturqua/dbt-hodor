@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from dbt_hodor.config import NodeStateConfig
-from dbt_hodor.metadata import UNKNOWN, DataVersion
-from dbt_hodor.records import Record
+from dbt_hodor.core.config import NodeStateConfig
+from dbt_hodor.core.metadata import UNKNOWN, DataVersion
+from dbt_hodor.core.records import Record
 
 BUILD = "build"
 REUSE = "reuse"

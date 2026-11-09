@@ -2,9 +2,9 @@ from dataclasses import replace
 
 import pytest
 
-from dbt_hodor.config import NodeStateConfig
-from dbt_hodor.engine import BUILD, REUSE, Decision, NodeFacts, decide, upstream_versions
-from dbt_hodor.metadata import UNKNOWN, DataVersion
+from dbt_hodor.core.config import NodeStateConfig
+from dbt_hodor.core.engine import BUILD, REUSE, Decision, NodeFacts, decide, upstream_versions
+from dbt_hodor.core.metadata import UNKNOWN, DataVersion
 
 NOW = 1_000_000 + 3_600_000  # one hour after the last build
 CFG = NodeStateConfig()  # lag_tolerance 45m

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 
-from dbt_hodor.hashing import SqlAnalysis
+from dbt_hodor.core.hashing import SqlAnalysis
 
 # Materializations that store their own data and have their own data version.
 OWN_DATA = frozenset({"table", "incremental", "snapshot", "seed"})

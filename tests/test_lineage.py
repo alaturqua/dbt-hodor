@@ -1,5 +1,5 @@
-from dbt_hodor.hashing import SqlAnalysis
-from dbt_hodor.lineage import GraphNode, Lineage, external_inputs, normalize_relation
+from dbt_hodor.core.hashing import SqlAnalysis
+from dbt_hodor.core.lineage import GraphNode, Lineage, external_inputs, normalize_relation
 
 GRAPH = {
     "source.p.raw.orders": GraphNode("source.p.raw.orders", "source", relation="c.raw.orders"),

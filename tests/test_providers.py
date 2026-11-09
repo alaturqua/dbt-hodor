@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from dbt_hodor.metadata import UNKNOWN, DataVersion
+from dbt_hodor.core.metadata import UNKNOWN, DataVersion
 from dbt_hodor.providers import (
     DeltaProvider,
     DuckDBProvider,

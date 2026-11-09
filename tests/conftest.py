@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from dbt_hodor.records import Record
+from dbt_hodor.core.records import Record
 
 
 def make_record(**overrides) -> Record:

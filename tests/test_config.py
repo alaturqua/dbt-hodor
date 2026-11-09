@@ -1,6 +1,6 @@
 import pytest
 
-from dbt_hodor.config import (
+from dbt_hodor.core.config import (
     DEFAULT_LAG_TOLERANCE_S,
     BaseTarget,
     NodeStateConfig,
