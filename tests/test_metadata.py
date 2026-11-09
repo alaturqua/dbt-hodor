@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from dbt_hodor.metadata import (
+from dbt_hodor.core.metadata import (
     UNKNOWN,
     DataVersion,
     HistoryEntry,

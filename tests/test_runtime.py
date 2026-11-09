@@ -682,8 +682,8 @@ def _clone_runtime(store, mode="on", base="base", allow=True):
 
 
 def _build_plan():
-    from dbt_hodor.config import NodeStateConfig
-    from dbt_hodor.engine import NodeFacts
+    from dbt_hodor.core.config import NodeStateConfig
+    from dbt_hodor.core.engine import NodeFacts
 
     facts = NodeFacts(kind="table", code_hash="c", config_hash="k", hash_version=1)
     plan = runtime.Plan(
@@ -730,7 +730,7 @@ def _clone_ready(store=None, provider=None, kind="table"):
     """A runtime whose clone choice is made: (CLONED, base record, base relation)."""
     from conftest import make_record
 
-    from dbt_hodor.clone import CLONED
+    from dbt_hodor.core.clone import CLONED
 
     instance = _clone_runtime(store or _NoStore())
     instance.provider = provider or _NoStore()

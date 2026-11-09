@@ -42,8 +42,8 @@ dbt, and how to run the opt-in live tests.
 1. **Write the test first.** The engine has table-driven unit tests, one case per rule, and
    that is usually where a decision change belongs. A change in behaviour with no test will
    be asked for one.
-2. **Keep decisions pure.** `engine.py` holds the rules and does no I/O. Hashing, lineage,
-   metadata and the stores stay separate. Please do not move I/O into the engine.
+2. **Keep decisions pure.** `core/engine.py` holds the rules. No module in `core/` imports
+   dbt or does I/O, and a test checks it. Please do not move I/O into `core/`.
 3. **Fail open.** Every failure path must end in a build, never a reuse, and must never fail
    the dbt run. If you add a new way for hodor to fail, add the test that proves it builds.
 4. **Run the checks.** `uv run pytest`, `uv run ruff check`, `uv run ruff format` and `uv run mypy` all have

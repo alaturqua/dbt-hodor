@@ -126,8 +126,20 @@ FILES = {
     "{{ ref('stg_orders') }} where current_user() is not null",
     "models/stamped.sql": "{{ config(materialized='table') }} select id, "
     "current_timestamp() as ts, current_user() as built_by from {{ ref('stg_orders') }}",
+    "models/documented.sql": "{{ config(materialized='table', "
+    "persist_docs={'relation': true, 'columns': true}) }} select id, amount from "
+    "{{ ref('stg_orders') }}",
+    "models/documented_child.sql": "{{ config(materialized='table') }} select * from "
+    "{{ ref('documented') }}",
     "models/schema.yml": """
         models:
+          - name: documented
+            description: orders with persisted docs
+            columns:
+              - name: id
+                description: the order id
+              - name: amount
+                description: the order amount
           - name: fct_orders
             columns:
               - name: id
@@ -232,6 +244,25 @@ def test_live_lifecycle(project):
         assert execute(f"SELECT max(amount) FROM {FQ}.secured_orders") == [(0,)]
     tests = [k for k in now if k.startswith("test.")]
     assert tests and all(now[t] == ("reuse", "no_new_data") for t in tests)
+    # persist_docs writes column comments as CHANGE COLUMN commits inside the build: the
+    # data version read after the build covers them, so the table and its child reuse
+    assert now["documented"] == ("reuse", "no_new_data")
+    assert now["documented_child"] == ("reuse", "no_new_data")
+    assert execute(
+        f"SELECT comment FROM {CATALOG}.information_schema.columns WHERE table_schema = "
+        f"'{SCHEMA}' AND table_name = 'documented' AND column_name = 'id'"
+    ) == [("the order id",)]
+
+    # a column comment written outside dbt is a CHANGE COLUMN commit, as a widened type is
+    execute(f"ALTER TABLE {FQ}.documented ALTER COLUMN id COMMENT 'changed outside dbt'")
+    dbt(project, "--select", "documented+")
+    now = decisions()
+    assert now["documented"] == ("build", "target_modified")
+    assert now["documented_child"] == ("build", "new_upstream_data")
+    dbt(project, "--select", "documented+")
+    now = decisions()
+    assert now["documented"] == ("reuse", "no_new_data")
+    assert now["documented_child"] == ("reuse", "no_new_data")
 
     # maintenance and zero-row writes are not data changes
     execute(f"OPTIMIZE {FQ}.raw_orders")

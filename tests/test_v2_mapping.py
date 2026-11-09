@@ -10,11 +10,11 @@ pytest.importorskip("google.protobuf")
 from google.protobuf import json_format  # noqa: E402
 
 import dbt_hodor.v2 as v2  # noqa: E402
-from dbt_hodor.clone import CLONED, PRE_CLONED  # noqa: E402
-from dbt_hodor.config import NodeStateConfig  # noqa: E402
-from dbt_hodor.engine import BUILD, REUSE, Decision, decide  # noqa: E402
-from dbt_hodor.hashing import HASH_VERSION, SqlAnalysis, analyze_sql, text_hash  # noqa: E402
-from dbt_hodor.metadata import UNKNOWN, DataVersion  # noqa: E402
+from dbt_hodor.core.clone import CLONED, PRE_CLONED  # noqa: E402
+from dbt_hodor.core.config import NodeStateConfig  # noqa: E402
+from dbt_hodor.core.engine import BUILD, REUSE, Decision, decide  # noqa: E402
+from dbt_hodor.core.hashing import HASH_VERSION, SqlAnalysis, analyze_sql, text_hash  # noqa: E402
+from dbt_hodor.core.metadata import UNKNOWN, DataVersion  # noqa: E402
 from dbt_hodor.v2 import mapping  # noqa: E402
 from dbt_hodor.v2.proto.query_cache_protobuf.query_cache import shared_pb2  # noqa: E402
 from dbt_hodor.v2.proto.query_cache_protobuf.query_cache.services import (  # noqa: E402
@@ -438,7 +438,7 @@ def test_clone_epoch_takes_digit_strings_only(data_version, epoch):
 
 
 def test_every_selector_criteria_maps_to_a_selection_criterion():
-    from dbt_hodor.selection import CRITERIA
+    from dbt_hodor.core.selection import CRITERIA
 
     values = [v for _, v in selector_service_pb2.SelectorCriteria.items() if v]
     assert sorted(mapping.criterion(v) for v in values) == sorted(CRITERIA)

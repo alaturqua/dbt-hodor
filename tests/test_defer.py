@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from dbt_hodor.defer import deferred_relations, split_relation
-from dbt_hodor.records import Record
+from dbt_hodor.core.defer import deferred_relations, split_relation
+from dbt_hodor.core.records import Record
 
 
 def _record(uid="model.p.a", node_hashes=None, action="build", status="success"):

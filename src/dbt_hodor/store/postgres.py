@@ -6,8 +6,8 @@ import threading
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from dbt_hodor.config import IDENT_RE
-from dbt_hodor.records import (
+from dbt_hodor.core.config import IDENT_RE
+from dbt_hodor.core.records import (
     COLUMN_NAMES,
     Record,
     add_column_sql,

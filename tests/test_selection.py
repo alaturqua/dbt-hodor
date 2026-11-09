@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from dbt_hodor.records import Record
-from dbt_hodor.selection import CRITERIA, SelectionError, select
+from dbt_hodor.core.records import Record
+from dbt_hodor.core.selection import CRITERIA, SelectionError, select
 
 HASH_KEYS = ("body", "configs", "contract", "macros", "relation_hash", "persisted_descriptions")
 SUB = {

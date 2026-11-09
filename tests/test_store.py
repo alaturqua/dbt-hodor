@@ -2,9 +2,9 @@ import pytest
 import sqlglot
 from sqlglot import exp
 
-from dbt_hodor.config import NodeStateConfig
-from dbt_hodor.engine import BUILD, NodeFacts, decide
-from dbt_hodor.records import COLUMN_NAMES, COLUMNS, TYPE_NAMES, Record
+from dbt_hodor.core.config import NodeStateConfig
+from dbt_hodor.core.engine import BUILD, NodeFacts, decide
+from dbt_hodor.core.records import COLUMN_NAMES, COLUMNS, TYPE_NAMES, Record
 from dbt_hodor.store import StoreError
 from dbt_hodor.store.delta import DeltaStore, quote_table, sql_literal, trino_literal
 from dbt_hodor.store.trino import TrinoStore

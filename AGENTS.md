@@ -19,7 +19,8 @@ uv run --group docs mkdocs build --strict
 - Follow the `karpathy-guidelines` skill: state assumptions, simplest change, touch only what
   the task needs, define a check and run it.
 - Test first. Decision changes get a case in the table-driven tests in `tests/test_engine.py`.
-- `engine.py` stays pure: no I/O. Hashing, lineage, metadata and stores live in their own modules.
+- `core/` stays pure: no dbt import and no I/O. `core/engine.py` holds the decision rules.
+  Stores, providers and everything that touches dbt live outside `core/`.
 - Fail open: every failure path ends in a build and never fails the dbt run.
 - A changed setting updates `docs/configuration.md` and the `README.md` table. The
   interactive guide links to them and holds no settings table. A new reason code goes in

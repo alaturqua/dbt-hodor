@@ -25,7 +25,7 @@ them you ran, if any.
 
 - [ ] Every new failure path ends in a **build**, never a reuse, and never fails the dbt run.
 - [ ] If this changes when a node is reused, there is a test for the case that must still build.
-- [ ] Decision logic stays in `engine.py` and does no I/O.
+- [ ] Decision logic stays in `core/engine.py`, and `core/` does no I/O.
 
 ## Documentation
 

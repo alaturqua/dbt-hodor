@@ -6,10 +6,10 @@ import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol
 
-from dbt_hodor.records import Record
+from dbt_hodor.core.records import Record
 
 if TYPE_CHECKING:
-    from dbt_hodor.config import Settings
+    from dbt_hodor.core.config import Settings
 
 
 class StoreError(Exception):

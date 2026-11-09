@@ -53,7 +53,7 @@ if not os.environ.get("HODOR_PG_DATABASE") or not os.environ.get("HODOR_PG_SCHEM
 if not (os.environ.get("HODOR_PG_ENDPOINT") or os.environ.get("HODOR_PG_HOST")):
     pytest.skip("neither HODOR_PG_ENDPOINT nor HODOR_PG_HOST is set", allow_module_level=True)
 
-from dbt_hodor.records import lookup_index_name  # noqa: E402
+from dbt_hodor.core.records import lookup_index_name  # noqa: E402
 from dbt_hodor.store.postgres import PostgresStore, lakebase_target  # noqa: E402
 from dbt_hodor.v2.proto.query_cache_protobuf.query_cache import shared_pb2  # noqa: E402
 from dbt_hodor.v2.proto.query_cache_protobuf.query_cache.services import (  # noqa: E402

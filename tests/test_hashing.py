@@ -2,7 +2,7 @@ import hashlib
 
 import pytest
 
-from dbt_hodor.hashing import (
+from dbt_hodor.core.hashing import (
     HASH_VERSION,
     INVOCATION_PLACEHOLDER,
     RUN_STARTED_PLACEHOLDER,

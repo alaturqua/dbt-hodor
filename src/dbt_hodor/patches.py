@@ -34,8 +34,8 @@ from dbt_common.events.functions import fire_event
 from dbt_common.ui import green, red, yellow
 
 from dbt_hodor.base_target import defer_target, defer_to_base, state_selection
-from dbt_hodor.clone import CLONED
-from dbt_hodor.engine import REUSE
+from dbt_hodor.core.clone import CLONED
+from dbt_hodor.core.engine import REUSE
 from dbt_hodor.plugin import ORIGINALS
 from dbt_hodor.runtime import (
     REPLAY_PREFIX,
